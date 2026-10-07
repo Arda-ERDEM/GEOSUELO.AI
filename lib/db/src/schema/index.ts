@@ -17,4 +17,6 @@
 //   export type InsertPost = z.infer<typeof insertPostSchema>;
 //   export type Post = typeof postsTable.$inferSelect;
 
-export {}
+export * from "./surface-markers";
+export * from "./underground-assets";
+export * from "./zones";

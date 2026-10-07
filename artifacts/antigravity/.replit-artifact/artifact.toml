@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "AntiGravity"
+description = "A web MVP for mapping surface infrastructure markers, predicting underground utility routes, and assessing excavation risk."
+version = "1.0.0"
+id = "artifacts/antigravity"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24890
+
+[services.development]
+run = "pnpm --filter @workspace/antigravity run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/antigravity", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/antigravity/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24890"
+BASE_PATH = "/"
