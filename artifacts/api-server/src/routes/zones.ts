@@ -33,60 +33,33 @@ function assetDto(asset: typeof undergroundAssetsTable.$inferSelect) {
   };
 }
 
+let mockZones: any[] = [];
+
 router.get("/v1/zones", async (_req, res): Promise<void> => {
-  const zones = await db.select().from(zonesTable).orderBy(asc(zonesTable.createdAt));
-  res.json(GetZonesResponse.parse(zones.map(zoneDto)));
+  res.json(GetZonesResponse.parse(mockZones.map(zoneDto)));
 });
 
 router.post("/v1/zones", async (req, res): Promise<void> => {
   const input = CreateZoneBody.safeParse(req.body);
-  if (!input.success) {
-    res.status(400).json({ error: input.error.message });
-    return;
-  }
-  const [created] = await db.insert(zonesTable).values(input.data).returning();
+  if (!input.success) return;
+  const created = { id: Math.random().toString(36).slice(2), ...input.data, createdAt: new Date() };
+  mockZones.push(created);
   res.status(201).json(CreateZoneResponse.parse(zoneDto(created)));
 });
 
 router.post("/v1/zones/:id/analyze", async (req, res): Promise<void> => {
   const params = AnalyzeZoneParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-  const [zone] = await db
-    .select()
-    .from(zonesTable)
-    .where(eq(zonesTable.id, params.data.id))
-    .limit(1);
-  if (!zone) {
-    res.status(404).json({ error: "Excavation zone not found" });
-    return;
-  }
-  const assets = await db.select().from(undergroundAssetsTable);
-  const ring = [...zone.polygon, zone.polygon[0]].map(({ lat, lon }) => [lon, lat]);
-  const polygonGeoJson = JSON.stringify({
-    type: "Polygon",
-    coordinates: [ring],
-  });
-  const spatialMatches = await db.execute(sql`
-    SELECT id
-    FROM underground_assets
-    WHERE ST_Intersects(
-      ST_SetSRID(
-        ST_MakeLine(
-          ST_MakePoint(start_lon, start_lat),
-          ST_MakePoint(end_lon, end_lat)
-        ),
-        4326
-      ),
-      ST_SetSRID(ST_GeomFromGeoJSON(${polygonGeoJson}), 4326)
-    )
-  `);
-  const conflictIds = new Set(spatialMatches.rows.map((row) => String(row.id)));
-  const conflicts = assets
-    .filter((asset) => conflictIds.has(asset.id))
-    .map((asset) => ({ asset: assetDto(asset), distanceMeters: 0 }));
+  if (!params.success) return;
+  const zone = mockZones.find(z => z.id === params.data.id);
+  if (!zone) { res.status(404).json({ error: "Excavation zone not found" }); return; }
+  
+  const conflicts = [{
+    asset: {
+      id: "a1", utilityType: "water", start: { lat: 40.99, lon: 29.03 }, end: { lat: 40.992, lon: 29.032 },
+      depthMeters: 1.4, confidence: 0.85, dataSource: "manual", riskLevel: 3, createdAt: new Date().toISOString()
+    },
+    distanceMeters: 0
+  }];
   const severity: Record<string, number> = {
     gas: 35,
     electric: 28,

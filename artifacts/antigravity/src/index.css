@@ -249,3 +249,102 @@
 @media(max-width:1100px){.workspace-grid,.lower-grid{grid-template-columns:minmax(0,1fr) 290px}.page-wrap{padding:20px}.topbar{padding:0 20px}.metrics{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:800px){.workspace-grid,.lower-grid{grid-template-columns:1fr}.map-card{height:520px;min-height:520px}.side-panel{display:grid;grid-template-columns:1fr 1fr}.top-date{display:none}.page-wrap{padding:16px}.topbar{height:60px;padding:0 16px}.page-head{align-items:flex-start}.page-title{font-size:21px}}
 @media(max-width:560px){.side-panel{display:flex}.metrics{gap:7px}.metric{padding:10px}.metric-value{font-size:17px}.metric-label{font-size:9px}.page-head{display:block}.page-head .btn{margin-top:12px}.top-actions{gap:5px}.live-tag{font-size:9px}.map-card{height:440px;min-height:440px}.map-head{padding:0 10px}.map-heading small{display:none}.legend{gap:7px;padding:7px}.legend-item{font-size:8px}.map-footer{left:8px;right:8px;bottom:38px}.marker-table th:nth-child(3),.marker-table td:nth-child(3){display:none}}
+
+.map-toolbar { position: absolute; top: 70px; left: 20px; z-index: 2000; display: flex; flex-direction: column; gap: 10px; }
+.tool-btn { background: white; border: 1px solid #d5d8ce; border-radius: 8px; padding: 12px; display: flex; align-items: center; gap: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); cursor: pointer; font-weight: 600; color: #34746a; transition: 0.2s; }
+.tool-btn:hover { background: #f4f5ed; }
+.tool-btn.active { background: #34746a; color: white; }
+.floating-panel { position: absolute; top: 70px; right: 20px; z-index: 2000; width: 380px; max-height: calc(100vh - 100px); overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-radius: 12px; background: #fbfaf5; }
+.full-map-card { position: absolute; inset: 0; }
+
+
+@keyframes scanline {
+  0% { top: 0; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+.ar-scanline {
+  position: absolute; left: 0; right: 0; height: 3px; background: rgba(0,255,100,0.8);
+  box-shadow: 0 0 15px rgba(0,255,100,0.8);
+  animation: scanline 2.5s infinite linear;
+}
+@keyframes blink { 50% { opacity: 0.3; } }
+.blink-anim { animation: blink 1.2s infinite; }
+
+/* HARDCORE ENGINEERING CAD UI */
+body { margin: 0; padding: 0; overflow: hidden; background: #1e1e1e !important; color: #d4d4d4 !important; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important; }
+.cad-layout { display: flex; flex-direction: column; height: 100vh; width: 100vw; background: #252526; }
+
+/* Menu Bar */
+.cad-menu-bar { display: flex; align-items: center; height: 26px; background: #3c3c3c; font-size: 12px; padding: 0 10px; border-bottom: 1px solid #111; user-select: none; }
+.cad-menu-logo { font-weight: bold; color: #fff; margin-right: 20px; letter-spacing: 0.5px; }
+.cad-menu-items { display: flex; gap: 14px; color: #ccc; }
+.cad-menu-items span:hover { color: #fff; cursor: pointer; }
+
+/* Toolbar */
+.cad-toolbar { display: flex; align-items: center; height: 32px; background: #2d2d30; padding: 0 10px; gap: 4px; border-bottom: 1px solid #111; }
+.cad-toolbar button { background: transparent; border: 1px solid transparent; color: #c8c8c8; padding: 4px 6px; border-radius: 3px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.cad-toolbar button:hover { background: #3e3e42; border-color: #555; }
+.cad-divider { width: 1px; height: 18px; background: #555; margin: 0 4px; }
+
+/* Main Workspace */
+.cad-main { display: flex; flex: 1; min-height: 0; }
+.cad-sidebar-left { width: 280px; background: #252526; display: flex; flex-direction: column; border-right: 1px solid #111; }
+.cad-canvas { flex: 1; background: #000; position: relative; }
+
+/* Sidebar Panels */
+.cad-panel { display: flex; flex-direction: column; border-bottom: 1px solid #1e1e1e; }
+.cad-panel-title { background: #2d2d30; padding: 6px 10px; font-size: 11px; font-weight: bold; color: #e0e0e0; display: flex; align-items: center; gap: 6px; text-transform: uppercase; border-bottom: 1px solid #111; }
+.cad-tree { padding: 10px; font-size: 12px; color: #ccc; overflow-y: auto; }
+.cad-tree details { margin-bottom: 6px; }
+.cad-tree summary { cursor: pointer; font-weight: bold; margin-bottom: 4px; outline: none; }
+.cad-tree-item { padding: 3px 0 3px 12px; display: flex; align-items: center; gap: 6px; }
+
+.cad-properties { flex: 1; overflow-y: auto; }
+.cad-prop-grid { font-size: 11px; }
+.cad-prop-row { display: flex; border-bottom: 1px solid #333; }
+.cad-prop-row span { padding: 4px 8px; }
+.cad-prop-row span:first-child { width: 120px; background: #1e1e1e; color: #aaa; border-right: 1px solid #333; }
+.cad-prop-row span:last-child { flex: 1; color: #fff; font-family: monospace; }
+
+/* Bottom Panel (Console/Table) */
+.cad-bottom-panel { height: 200px; background: #1e1e1e; border-top: 1px solid #111; display: flex; flex-direction: column; }
+.cad-tabs { display: flex; background: #2d2d30; border-bottom: 1px solid #111; }
+.cad-tab { padding: 6px 16px; font-size: 11px; color: #aaa; cursor: pointer; display: flex; align-items: center; gap: 6px; border-right: 1px solid #111; }
+.cad-tab:hover { background: #3e3e42; }
+.cad-tab.active { background: #1e1e1e; color: #fff; font-weight: bold; border-top: 2px solid #007acc; }
+.cad-table-container { flex: 1; overflow: auto; background: #1e1e1e; }
+.cad-table { width: 100%; border-collapse: collapse; font-size: 11px; color: #ccc; text-align: left; }
+.cad-table th { background: #2d2d30; padding: 4px 8px; border: 1px solid #333; position: sticky; top: 0; font-weight: normal; }
+.cad-table td { padding: 4px 8px; border: 1px solid #333; }
+.cad-table tr:hover { background: #2a2d2e !important; }
+
+/* Status Bar */
+.cad-status-bar { height: 22px; background: #007acc; color: #fff; display: flex; align-items: center; font-size: 11px; padding: 0 10px; gap: 20px; }
+
+/* Modals Override for Dark CAD theme */
+.cad-modal { background: #252526 !important; border: 1px solid #444 !important; color: #ccc !important; box-shadow: 0 10px 30px rgba(0,0,0,0.5) !important; border-radius: 0 !important; }
+.cad-modal .modal-top { background: #2d2d30 !important; border-bottom: 1px solid #111 !important; }
+.cad-modal .modal-title { color: #fff !important; font-size: 13px !important; }
+.cad-modal .field-label { color: #aaa !important; font-size: 11px !important; text-transform: uppercase; }
+.cad-modal .field, .cad-modal .select { background: #1e1e1e !important; border: 1px solid #333 !important; color: #fff !important; border-radius: 0 !important; padding: 4px 8px !important; font-size: 12px !important; }
+.cad-modal .btn { background: #333 !important; color: #ccc !important; border: 1px solid #555 !important; border-radius: 0 !important; }
+.cad-modal .btn:hover { background: #444 !important; }
+.cad-modal .btn-primary { background: #007acc !important; color: #fff !important; border-color: #007acc !important; }
+.cad-modal .btn-primary:hover { background: #0098ff !important; }
+
+/* Leaflet override */
+.leaflet-container { background: #111 !important; }
+.leaflet-control-attribution { background: rgba(0,0,0,0.7) !important; color: #888 !important; }
+
+/* Menu Dropdowns */
+.menu-active { color: #fff; background: #555; padding: 2px 6px; border-radius: 2px; }
+.cad-dropdown { position: absolute; top: 100%; left: 0; background: #252526; border: 1px solid #444; min-width: 180px; box-shadow: 2px 5px 15px rgba(0,0,0,0.5); z-index: 9999; display: flex; flex-direction: column; padding: 4px 0; }
+.cad-dropdown div { padding: 6px 14px; color: #ccc; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+.cad-dropdown div:hover { background: #007acc; color: #fff; }
+.cad-dropdown .divider { height: 1px; background: #444; margin: 4px 0; padding: 0; }
+.cad-dropdown .hotkey { color: #888; font-size: 10px; }
+.cad-dropdown div:hover .hotkey { color: #ddd; }
+
+.leaflet-tooltip { background-color: #252526 !important; border: 1px solid #007acc !important; color: white !important; box-shadow: 0 5px 15px rgba(0,0,0,0.6) !important; padding: 0 !important; } .leaflet-tooltip-top:before { border-top-color: #007acc !important; }

@@ -1,4 +1,5 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import Draggable from 'react-draggable';
+import { type ReactNode, useEffect, useMemo, useState, useRef } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   useHealthCheck, useGetDashboard, useGetMarkers, useCreateMarker, useUpdateMarker,
@@ -9,11 +10,12 @@ import type { Coordinate, SurfaceMarker, SurfaceMarkerInput, UndergroundAsset } 
 import {
   Activity, AlertTriangle, ArrowDownUp, Cable, Check, ChevronDown, CircleHelp,
   Crosshair, Edit3, Gauge, Layers3, MapPin, Minus, Plus, RefreshCw,
-  Route, Search, ShieldCheck, Trash2, Triangle, X,
+  Route, Search, ShieldCheck, Trash2, Triangle, X, Video, Radio, Scan, History, Waves, Calculator, Aperture, AlertOctagon, MousePointer2, Move, ZoomIn, FolderTree, Database, Settings2, SlidersHorizontal, TerminalSquare, Eye,
 } from 'lucide-react';
 import L from 'leaflet';
-import { CircleMarker, MapContainer, Marker, Polygon, Polyline, ScaleControl, TileLayer, useMap, useMapEvents } from 'react-leaflet';
+import { CircleMarker, LayersControl, MapContainer, Marker, Polygon, Polyline, Popup, ScaleControl, TileLayer, useMap, useMapEvents, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
+import { StreetView360 } from '@/components/StreetView360';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -26,6 +28,13 @@ const UTILITY_OPTIONS = ['water', 'gas', 'fiber', 'electric', 'sewer'] as const;
 const MARKER_OPTIONS = ['manhole', 'valve', 'transformer', 'hydrant'] as const;
 type UtilityType = typeof UTILITY_OPTIONS[number];
 
+const UTILITY_COLORS: Record<UtilityType, string> = {
+  water: '#1e90ff',
+  gas: '#ffcc00',
+  electric: '#ff3333',
+  fiber: '#ff6600',
+  sewer: '#33cc33'
+};
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -64,9 +73,9 @@ function Workspace() {
   const predictRoute = usePredictRoute();
   const createZone = useCreateZone();
   const analyzeZone = useAnalyzeZone();
-  const markers = markersQuery.data ?? [];
-  const assets = assetsQuery.data ?? [];
-  const zones = zonesQuery.data ?? [];
+  const markers = Array.isArray(markersQuery.data) ? markersQuery.data : [];
+  const assets = Array.isArray(assetsQuery.data) ? assetsQuery.data : [];
+  const zones = Array.isArray(zonesQuery.data) ? zonesQuery.data : [];
   const [selectedMarker, setSelectedMarker] = useState<string>('');
   const [routeFrom, setRouteFrom] = useState('');
   const [routeTo, setRouteTo] = useState('');
@@ -83,10 +92,42 @@ function Workspace() {
   const [zoneName, setZoneName] = useState('');
   const [selectedZone, setSelectedZone] = useState('');
   const [analysis, setAnalysis] = useState<NonNullable<typeof analyzeZone.data> | null>(null);
-  const [apiExpanded, setApiExpanded] = useState(false);
+  const [competitorExpanded, setCompetitorExpanded] = useState(false);
+  
+  const [activeBottomTab, setActiveBottomTab] = useState<'table' | 'console' | 'clash'>('table');
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [activePointerTool, setActivePointerTool] = useState<'select' | 'pan' | 'zoom' | 'start-wp' | 'end-wp'>('select');
+  const [streetViewMode, setStreetViewMode] = useState<'split' | 'fullscreen' | 'map'>('split');
+
+  const arRef = useRef<HTMLDivElement>(null);
+  const lidarRef = useRef<HTMLDivElement>(null);
+  const timeRef = useRef<HTMLDivElement>(null);
+  const sinkholeRef = useRef<HTMLDivElement>(null);
+  const fluidRef = useRef<HTMLDivElement>(null);
+  const costRef = useRef<HTMLDivElement>(null);
+
+  const [waypointUtility, setWaypointUtility] = useState<UtilityType>('water');
+  const [deletedAssetIds, setDeletedAssetIds] = useState<string[]>([]);
+const [activePanels, setActivePanels] = useState<string[]>([]);
+  const togglePanel = (id: string) => setActivePanels(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (activePanels.includes('ar_camera')) {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+        .then(stream => { if (videoRef.current) videoRef.current.srcObject = stream; })
+        .catch(err => console.error("Kamera açılamadı:", err));
+    } else {
+      if (videoRef.current && videoRef.current.srcObject) {
+        (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+      }
+    }
+  }, [activePanels]);
+
   const [toast, setToast] = useState('');
   const [viewZoom, setViewZoom] = useState(15);
 
+  
   const invalidate = (includeAssets = false) => {
     void client.invalidateQueries({ queryKey: getGetDashboardQueryKey() });
     void client.invalidateQueries({ queryKey: getGetMarkersQueryKey() });
@@ -102,11 +143,50 @@ function Workspace() {
     return origin ? markers.filter((m) => m.id !== origin.id && m.utilityType === origin.utilityType) : markers;
   }, [markers, routeFrom]);
   const visibleAssets = useMemo(() => {
-    return predictedAsset && !assets.some((asset) => asset.id === predictedAsset.id)
-      ? [...assets, predictedAsset] : assets;
-  }, [assets, predictedAsset]);
+    const merged = predictedAsset && !assets.some((asset) => asset.id === predictedAsset.id) ? [...assets, predictedAsset] : assets; return merged.filter(a => !deletedAssetIds.includes(a.id));
+  }, [assets, predictedAsset, deletedAssetIds]);
 
-  const openNewMarker = (center: Coordinate = searchCenter) => {
+  
+const [clashWarning, setClashWarning] = useState<string | null>(null);
+
+  // Ray-casting algorithm for point in polygon
+  const isPointInPolygon = (point: Coordinate, vs: Coordinate[]) => {
+    let x = point.lon, y = point.lat;
+    let inside = false;
+    for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        let xi = vs[i].lon, yi = vs[i].lat;
+        let xj = vs[j].lon, yj = vs[j].lat;
+        let intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+  };
+
+  const checkClash = () => {
+    if (zonePoints.length < 3) return;
+    for (const asset of visibleAssets) {
+      // Check start point, end point, and midpoint
+      const mid = { lat: (asset.start.lat + asset.end.lat)/2, lon: (asset.start.lon + asset.end.lon)/2 };
+      if (isPointInPolygon(asset.start, zonePoints) || isPointInPolygon(asset.end, zonePoints) || isPointInPolygon(mid, zonePoints)) {
+        let name = asset.utilityType === 'water' ? 'Su Borusu' : asset.utilityType === 'gas' ? 'Doğalgaz Borusu' : asset.utilityType === 'fiber' ? 'Fiber Kablo' : 'Altyapı Hattı';
+        setClashWarning(`DİKKAT! Çizdiğiniz kazı alanı içerisinde ${name} tespit edildi! Olası Çarpışma Riski!`);
+        setActiveBottomTab('clash'); // Also switch tab
+        return;
+      }
+    }
+    setClashWarning("Kazı alanı temiz. Tespit edilen hat yok.");
+  };
+
+  useEffect(() => {
+    if (zonePoints.length >= 3) {
+      checkClash();
+    } else {
+      setClashWarning(null);
+    }
+  }, [zonePoints, visibleAssets]);
+
+
+const openNewMarker = (center: Coordinate = searchCenter) => {
     setMarkerForm(emptyMarker(center));
     setMarkerError('');
     setMarkerDialog('new');
@@ -133,6 +213,22 @@ function Workspace() {
       createMarker.mutate({ data: markerForm }, { onSuccess: finish, onError: (e) => setMarkerError(errorMessage(e)) });
     }
   };
+  const deleteWaypoint = (marker: SurfaceMarker) => {
+    const touches = (p: Coordinate) => Math.abs(p.lat - marker.lat) < 1e-7 && Math.abs(p.lon - marker.lon) < 1e-7;
+    deleteMarker.mutate({ id: marker.id }, {
+      onSuccess: () => {
+        const attached = visibleAssets.filter((a) => a.dataSource === 'ai_prediction' && (touches(a.start) || touches(a.end))).map((a) => a.id);
+        if (attached.length) setDeletedAssetIds((prev) => [...prev, ...attached]);
+        if (predictedAsset && attached.includes(predictedAsset.id)) setPredictedAsset(null);
+        if (routeFrom === marker.id) { setRouteFrom(''); setRouteTo(''); }
+        if (routeTo === marker.id) setRouteTo('');
+        if (selectedMarker === marker.id) setSelectedMarker('');
+        invalidate(true);
+        announce(`"${marker.name}" silindi`);
+      },
+      onError: (e) => announce(`Waypoint silinemedi: ${errorMessage(e)}`),
+    });
+  };
   const removeMarker = (marker: SurfaceMarker) => {
     if (!window.confirm(`“${marker.name}” silinsin mi? Bu işlem geri alınamaz.`)) return;
     deleteMarker.mutate({ id: marker.id }, {
@@ -151,12 +247,65 @@ function Workspace() {
     });
   };
   const startZone = () => { setZonePoints([]); setZoneDrawing(true); setAnalysis(null); };
+  const clearPredictions = async () => {
+    const aiIds = visibleAssets.filter((a) => a.dataSource === 'ai_prediction').map((a) => a.id);
+    if (!aiIds.length) { announce('Silinecek tahmini çizim yok'); return; }
+    setDeletedAssetIds((prev) => [...prev, ...aiIds]);
+    setPredictedAsset(null);
+    setRouteFrom('');
+    setRouteTo('');
+    try {
+      const res = await fetch('/api/v1/predictions', { method: 'DELETE' });
+      if (!res.ok && res.status !== 204) throw new Error(String(res.status));
+      invalidate(true);
+      announce(`${aiIds.length} tahmini çizim silindi`);
+    } catch {
+      announce('Çizimler ekrandan kaldırıldı, sunucudan silinemedi');
+    }
+  };
   const onMapCoordinateClick = (coordinate: Coordinate) => {
+    if (activePointerTool === 'start-wp' || activePointerTool === 'end-wp') {
+      const isStart = activePointerTool === 'start-wp';
+      const name = isStart ? `Başlangıç Vana ${Math.floor(Math.random() * 100)}` : `Bitiş Vana ${Math.floor(Math.random() * 100)}`;
+      createMarker.mutate({
+        data: { name, lat: coordinate.lat, lon: coordinate.lon, type: 'valve', utilityType: waypointUtility, confidence: 0.9 }
+      }, {
+        onSuccess: (res) => {
+           invalidate(true);
+           if (isStart) setRouteFrom(res.id);
+           if (!isStart) setRouteTo(res.id);
+           setActivePointerTool('select');
+           announce(name + ' eklendi');
+        }
+      });
+      return;
+    }
     if (zoneDrawing) {
       setZonePoints((previous) => [...previous, coordinate]);
       return;
     }
     openNewMarker(coordinate);
+  };
+
+  const handleStreetWaypoint = (coordinate: Coordinate, isStart: boolean, utilityType: string) => {
+    const name = isStart ? `Sokak Başlangıç Vana ${Math.floor(Math.random() * 100)}` : `Sokak Bitiş Vana ${Math.floor(Math.random() * 100)}`;
+    createMarker.mutate({
+      data: {
+        name,
+        lat: coordinate.lat,
+        lon: coordinate.lon,
+        type: 'valve',
+        utilityType: (utilityType as UtilityType) || waypointUtility,
+        confidence: 0.95
+      }
+    }, {
+      onSuccess: (res) => {
+        invalidate(true);
+        if (isStart) setRouteFrom(res.id);
+        if (!isStart) setRouteTo(res.id);
+        announce(`${name} sokak zeminine başarıyla eklendi!`);
+      }
+    });
   };
   const saveZone = () => {
     if (!zoneName.trim() || zonePoints.length < 3) return;
@@ -184,201 +333,628 @@ function Workspace() {
   };
 
   return (
-    <div className="app-shell">
-      <main className="main-area">
-        <header className="topbar">
-          <div className="topbar-brand">
-            <div className="topbar-brand-mark"><Layers3 size={17} strokeWidth={1.8} /></div>
-            <div className="topbar-brand-copy"><strong>AntiGravity</strong><span>Risk haritası</span></div>
+    <div className="cad-layout" onClick={() => setOpenMenu(null)}>
+      {/* 1. MENU BAR (Klasik Windows/CAD Menüsü) */}
+      <div className="cad-menu-bar">
+        <div className="cad-menu-logo">GeoSuelo.AI</div>
+        <div className="cad-menu-items">
+          <div className="menu-wrap" style={{position:'relative'}} onClick={(e) => {e.stopPropagation(); setOpenMenu(openMenu === 'file' ? null : 'file')}}>
+            <span className={openMenu === 'file' ? 'menu-active' : ''}>File</span>
+            {openMenu === 'file' && <div className="cad-dropdown"><div>New Project</div><div>Open Project...</div><div>Save <span className="hotkey">Ctrl+S</span></div><div>Export to DXF</div><div className="divider"></div><div>Exit</div></div>}
           </div>
-          <div className="top-actions">
-            <div className="live-tag"><span className="health-dot" style={{ width: 6, height: 6 }} />{health.isError ? 'API çevrimdışı' : 'Sistem hazır'}</div>
-            <div className="top-date">İSTANBUL · 40.990° N / 29.030° E</div>
+          <div className="menu-wrap" style={{position:'relative'}} onClick={(e) => {e.stopPropagation(); setOpenMenu(openMenu === 'edit' ? null : 'edit')}}>
+            <span className={openMenu === 'edit' ? 'menu-active' : ''}>Edit</span>
+            {openMenu === 'edit' && <div className="cad-dropdown"><div>Undo <span className="hotkey">Ctrl+Z</span></div><div>Redo <span className="hotkey">Ctrl+Y</span></div><div className="divider"></div><div>Cut</div><div>Copy</div><div>Paste</div></div>}
           </div>
-        </header>
-        <div className="page-wrap">
-          <div className="page-head">
-            <div><div className="eyebrow">SAHA OPERASYONLARI / İSTANBUL</div><h1 className="page-title">Yeraltı risk haritası</h1><div className="page-desc">Yüzey bulguları, tahmini hatlar ve kazı riskleri tek görünümde.</div></div>
-            <button className="btn btn-primary" onClick={() => openNewMarker()} data-testid="button-add-marker"><Plus size={15} /> Yüzey işareti kaydet</button>
+          <div className="menu-wrap" style={{position:'relative'}} onClick={(e) => {e.stopPropagation(); setOpenMenu(openMenu === 'view' ? null : 'view')}}>
+            <span className={openMenu === 'view' ? 'menu-active' : ''}>View</span>
+            {openMenu === 'view' && <div className="cad-dropdown"><div>Toggle Project Explorer</div><div>Toggle Console</div><div>Fullscreen Map <span className="hotkey">F11</span></div></div>}
           </div>
-
-          <div className="metrics">
-            <Metric label="Yüzey işaretleri" value={dashboard.data?.markerCount} icon={<Crosshair size={15} />} loading={dashboard.isLoading} />
-            <Metric label="Haritalı hatlar" value={dashboard.data?.assetCount} icon={<Cable size={15} />} loading={dashboard.isLoading} />
-            <Metric label="Kazı bölgeleri" value={dashboard.data?.zoneCount} icon={<Triangle size={15} />} loading={dashboard.isLoading} />
-            <Metric label="Yüksek riskli hatlar" value={dashboard.data?.highRiskCount} icon={<AlertTriangle size={15} />} loading={dashboard.isLoading} />
+          <div className="menu-wrap" style={{position:'relative'}} onClick={(e) => {e.stopPropagation(); setOpenMenu(openMenu === 'layer' ? null : 'layer')}}>
+            <span className={openMenu === 'layer' ? 'menu-active' : ''}>Layer</span>
+            {openMenu === 'layer' && <div className="cad-dropdown"><div>Add Vector Layer (.shp)</div><div>Add Raster Layer (.tif)</div><div className="divider"></div><div>Layer Properties</div></div>}
           </div>
-          {dashboard.isError && <ErrorBox message={`Özet veriler yüklenemedi. ${errorMessage(dashboard.error)}`} onRetry={() => void dashboard.refetch()} />}
-
-          <div className="workspace-grid">
-            <section className="map-card" aria-label="Kadıköy altyapı haritası">
-              <div className="map-head">
-                <div className="map-heading"><MapPin size={15} color="#3a7468" /> Kadıköy, İstanbul <small>· Yüzey bulguları görünümü</small></div>
-                <div className="map-controls">
-                  <button className="map-control" aria-label="Yakınlaştır" onClick={() => setViewZoom((z) => Math.min(19, z + 1))} data-testid="button-zoom-in"><Plus size={13} /></button>
-                  <button className="map-control" aria-label="Uzaklaştır" onClick={() => setViewZoom((z) => Math.max(10, z - 1))} data-testid="button-zoom-out"><Minus size={13} /></button>
-                  <button className="map-control" aria-label="Harita merkezini sıfırla" onClick={() => { setSearchCenter(MAP); setSearchLat(String(MAP.lat)); setSearchLon(String(MAP.lon)); setViewZoom(15); }} data-testid="button-center-map"><Crosshair size={13} /></button>
-                </div>
-              </div>
-              <div className="map-canvas" data-testid="map-canvas">
-                <MapContainer center={[MAP.lat, MAP.lon]} zoom={15} minZoom={3} maxZoom={20} zoomControl={false} scrollWheelZoom className="leaflet-map">
-                  <TileLayer
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> katkıda bulunanlar'
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  />
-                  <MapSizeInvalidator />
-                  <MapViewport center={searchCenter} zoom={viewZoom} onCenterChange={(coordinate) => {
-                    setSearchCenter((previous) => Math.abs(previous.lat - coordinate.lat) < 0.00002 && Math.abs(previous.lon - coordinate.lon) < 0.00002 ? previous : coordinate);
-                    setSearchLat(coordinate.lat.toFixed(6));
-                    setSearchLon(coordinate.lon.toFixed(6));
-                  }} onZoomChange={setViewZoom} />
-                  <MapClickHandler onCoordinateClick={onMapCoordinateClick} />
-                  <ScaleControl position="bottomleft" imperial={false} />
-                  {visibleAssets.map((asset) => <Polyline key={asset.id} positions={[[asset.start.lat, asset.start.lon] as [number, number], [asset.end.lat, asset.end.lon] as [number, number]]} pathOptions={{ color: '#c74739', weight: 3, opacity: 0.92, dashArray: '8 7', lineCap: 'round' }} />)}
-                  {zones.map((zone) => <Polygon key={zone.id} positions={zone.polygon.map((point) => [point.lat, point.lon] as [number, number])} pathOptions={{ color: zone.id === selectedZone ? '#a66a25' : '#bd8537', weight: 2, dashArray: '7 5', fillColor: '#d4a04a', fillOpacity: zone.id === selectedZone ? 0.2 : 0.12 }} />)}
-                  {zonePoints.length >= 3
-                    ? <Polygon positions={zonePoints.map((point) => [point.lat, point.lon] as [number, number])} pathOptions={{ color: '#bd8537', weight: 2, dashArray: '5 4', fillColor: '#d4a04a', fillOpacity: 0.16 }} />
-                    : zonePoints.length >= 2 && <Polyline positions={zonePoints.map((point) => [point.lat, point.lon] as [number, number])} pathOptions={{ color: '#bd8537', weight: 2, dashArray: '5 4' }} />}
-                  {zonePoints.map((point, index) => <CircleMarker key={`draft-${index}`} center={[point.lat, point.lon]} radius={5} pathOptions={{ color: '#fff', weight: 2, fillColor: '#c68d3e', fillOpacity: 1 }} />)}
-                  {markers.map((marker) => {
-                    return <Marker key={marker.id} position={[marker.lat, marker.lon]} icon={markerIcon(marker.type, marker.name, selectedMarker === marker.id)} eventHandlers={{ click: () => setSelectedMarker(marker.id) }} title={`${marker.name} · ${enumLabel(marker.utilityType)}`} bubblingMouseEvents={false} />;
-                  })}
-                </MapContainer>
-                {zoneDrawing && <div className="map-callout">Haritaya tıklayarak bölge köşelerini ekleyin · {zonePoints.length} nokta</div>}
-              </div>
-              <div className="map-footer">
-                <div className="legend"><span className="legend-item"><i className="legend-dot" /> Yüzey işareti</span><span className="legend-item"><i className="legend-line" /> Tahmini hat</span><span className="legend-item"><span style={{ width: 8, height: 8, border: '1px dashed #bd8537', background: '#ead6af', display: 'inline-block' }} /> Çalışma bölgesi</span></div>
-              </div>
-            </section>
-
-            <div className="side-panel">
-              <section className="panel" id="route-panel">
-                <div className="panel-head"><div className="panel-title"><Route size={14} color="#34746a" /> Güzergâh tahmini</div><span className="panel-kicker">Yüzeyden yüzeye</span></div>
-                <div className="panel-body">
-                  <div className="route-pair">
-                    <div><label className="field-label" htmlFor="route-from">Başlangıç işareti</label><select id="route-from" className="select" value={routeFrom} onChange={(e) => { setRouteFrom(e.target.value); setRouteTo(''); }} data-testid="select-route-from"><option value="">İşaret seçin</option>{markers.map((m) => <option value={m.id} key={m.id}>{m.name} · {enumLabel(m.utilityType)}</option>)}</select></div>
-                    <div className="route-arrow"><ArrowDownUp size={14} /></div>
-                    <div><label className="field-label" htmlFor="route-to">Bitiş işareti</label><select id="route-to" className="select" value={routeTo} onChange={(e) => setRouteTo(e.target.value)} data-testid="select-route-to"><option value="">İşaret seçin</option>{compatibleMarkers.map((m) => <option value={m.id} key={m.id}>{m.name}</option>)}</select></div>
-                  </div>
-                  <button className="btn btn-primary wide-btn" style={{ marginTop: 12 }} disabled={!routeFrom || !routeTo || predictRoute.isPending} onClick={runPrediction} data-testid="button-predict-route">{predictRoute.isPending ? <RefreshCw size={13} className="animate-spin" /> : <Route size={13} />} {predictRoute.isPending ? 'Güzergâh tahmin ediliyor…' : 'Yeraltı hattını tahmin et'}</button>
-                  {predictRoute.isError && <div className="error-box" style={{ marginTop: 9, marginBottom: 0 }}>Güzergâh tahmini başarısız. {errorMessage(predictRoute.error)}<button className="btn btn-sm" onClick={runPrediction} style={{ marginLeft: 5 }}>Yeniden dene</button></div>}
-                  <div className="hint">Yalnızca aynı altyapı türündeki işaretler eşleştirilebilir. Tahmin edilen güzergâhlar GPR ile doğrulanmış veri değil, tahmindir.</div>
-                  {predictedAsset && <div className="route-result"><strong>Tahmin oluşturuldu · {enumLabel(predictedAsset.utilityType)}</strong>Derinlik {predictedAsset.depthMeters} m · Güven {Math.round(predictedAsset.confidence * 100)}%<br />Risk düzeyi {predictedAsset.riskLevel}/5 · {enumLabel(predictedAsset.dataSource)}</div>}
-                </div>
-              </section>
-
-              <section className="panel" id="zones-panel">
-                <div className="panel-head"><div className="panel-title"><ShieldCheck size={14} color="#34746a" /> Kazı güvenliği</div><span className="panel-kicker">Bölge incelemesi</span></div>
-                <div className="panel-body">
-                  <label className="field-label" htmlFor="select-zone">Kayıtlı çalışma bölgesi</label>
-                  <select className="select" id="select-zone" value={selectedZone} onChange={(e) => { setSelectedZone(e.target.value); setAnalysis(null); }} data-testid="select-zone"><option value="">İncelenecek bölgeyi seçin</option>{zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}</select>
-                  <div className="field-row" style={{ marginTop: 9 }}>
-                    <button className="btn btn-primary wide-btn" onClick={analyzeSelectedZone} disabled={!selectedZone || analyzeZone.isPending} data-testid="button-analyze-zone">{analyzeZone.isPending ? 'İnceleniyor…' : <><ShieldCheck size={13} /> Çakışmaları incele</>}</button>
-                    <button className="btn wide-btn" onClick={startZone} data-testid="button-draw-zone"><Triangle size={13} /> Bölge çiz</button>
-                  </div>
-                  {zoneDrawing && <div className="field-row" style={{ marginTop: 8 }}><button className="btn btn-sm" onClick={() => setZonePoints((points) => points.slice(0, -1))} disabled={!zonePoints.length}>Noktayı geri al</button><button className="btn btn-sm btn-primary" onClick={() => { if (zonePoints.length >= 3) setZoneDialog(true); }} disabled={zonePoints.length < 3}>{zonePoints.length} noktayı kaydet</button><button className="btn btn-sm" onClick={() => { setZoneDrawing(false); setZonePoints([]); }}>İptal</button></div>}
-                  {zonesQuery.isError && <ErrorBox message="Kayıtlı bölgeler yüklenemedi." onRetry={() => void zonesQuery.refetch()} />}
-                  {analyzeZone.isError && <ErrorBox message={`Risk analizi başarısız. ${errorMessage(analyzeZone.error)}`} onRetry={analyzeSelectedZone} />}
-                  {analysis && <div className="route-result" style={{ marginTop: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><strong style={{ margin: 0 }}>{analysis.zone.name}</strong><span className={`risk-badge risk-${analysis.riskLevel}`}>{enumLabel(analysis.riskLevel)}</span></div>
-                    <div style={{ display: 'flex', gap: 9, alignItems: 'baseline', marginTop: 8 }}><span className="risk-score">{analysis.riskScore}</span><span>100 üzerinden risk puanı</span></div>
-                    <div style={{ marginTop: 5 }}>{analysis.conflicts.length} olası çakışma · {analysis.message}</div>
-                    {analysis.conflicts.map((conflict) => <div className="conflict-item" key={conflict.asset.id}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong>{enumLabel(conflict.asset.utilityType)} hattı</strong><span className={`risk-badge ${conflict.asset.riskLevel >= 4 ? 'risk-high' : conflict.asset.riskLevel >= 3 ? 'risk-medium' : 'risk-low'}`}>Risk {conflict.asset.riskLevel}/5</span></div><div className="asset-meta">{conflict.distanceMeters} m bölgeye uzaklık · {conflict.asset.depthMeters} m derinlik · tahmindir, GPR ile doğrulanmamıştır</div></div>)}
-                    <div className="risk-report">
-                      <div className="risk-report-method"><strong>Yöntem</strong><span>PostGIS vektör kesişimi + sentetik hat taraması</span></div>
-                      <section><strong>Kanıt ve veri kaynağı</strong><ul>{analysis.evidence.map((item, index) => <li key={`evidence-${index}`}>{item}</li>)}</ul></section>
-                      <section><strong>Bu veride bulunmayanlar</strong><ul>{analysis.unknowns.map((item, index) => <li key={`unknown-${index}`}>{item}</li>)}</ul></section>
-                      <section><strong>Önerilen adımlar</strong><ul>{analysis.recommendedActions.map((item, index) => <li key={`action-${index}`}>{item}</li>)}</ul></section>
-                      <div className="risk-report-finance"><strong>Parasal hasar tahmini</strong><span>{analysis.financialImpact.estimated && analysis.financialImpact.amount !== null ? `${analysis.financialImpact.amount.toLocaleString('tr-TR')} ${analysis.financialImpact.currency ?? ''}` : 'Hesaplanmadı'}</span><small>{analysis.financialImpact.reason}</small></div>
-                      <div className="risk-report-warning" role="note"><AlertTriangle size={13} /> Bu rapor ön taramadır; saha doğrulaması, işletmeci teyidi veya kazı izninin yerine geçmez.</div>
-                    </div>
-                  </div>}
-                </div>
-              </section>
-
-              <section className="panel" id="nearby-panel">
-                <div className="panel-head"><div className="panel-title"><Search size={14} color="#34746a" /> Yakındaki varlıklar</div><span className="panel-kicker">Yarıçap araması</span></div>
-                <div className="panel-body">
-                  <div className="field-grid">
-                    <div><label className="field-label" htmlFor="search-lat">Enlem</label><input className="field mono" id="search-lat" value={searchLat} onChange={(e) => setSearchLat(e.target.value)} data-testid="input-search-lat" /></div>
-                    <div><label className="field-label" htmlFor="search-lon">Boylam</label><input className="field mono" id="search-lon" value={searchLon} onChange={(e) => setSearchLon(e.target.value)} data-testid="input-search-lon" /></div>
-                  </div>
-                  <div className="field-row" style={{ marginTop: 8, alignItems: 'end' }}>
-                    <div><label className="field-label" htmlFor="search-radius">Yarıçap · metre</label><input className="field mono" id="search-radius" type="number" min="1" max="5000" value={radiusInput} onChange={(e) => setRadiusInput(e.target.value)} data-testid="input-search-radius" /></div>
-                    <button className="btn btn-primary" onClick={searchNearby} disabled={assetsQuery.isFetching} data-testid="button-search-assets"><Search size={13} /> Ara</button>
-                  </div>
-                  {assetsQuery.isError && <ErrorBox message={`Varlık araması başarısız. ${errorMessage(assetsQuery.error)}`} onRetry={() => void assetsQuery.refetch()} />}
-                  <div className="asset-list" style={{ marginTop: 9 }}>
-                    {assetsQuery.isLoading ? <><div className="loading-row" /><div className="loading-row" /></> : assets.length ? assets.slice(0, 4).map((asset) => <AssetRow asset={asset} key={asset.id} />) : <div className="empty-state">{assetsQuery.isError ? 'Varlık araması şu anda kullanılamıyor.' : 'Bu arama yarıçapında haritalanmış varlık yok. Tahmin edilen hatlar, güzergâh tahmininden sonra görünür.'}</div>}
-                  </div>
-                </div>
-              </section>
-            </div>
+          <div className="menu-wrap" style={{position:'relative'}} onClick={(e) => {e.stopPropagation(); setOpenMenu(openMenu === 'analysis' ? null : 'analysis')}}>
+            <span className={openMenu === 'analysis' ? 'menu-active' : ''}>Analysis (4D, IoT)</span>
+            {openMenu === 'analysis' && <div className="cad-dropdown"><div onClick={() => togglePanel('time_machine')}>4D Digital Twin (Time Machine)</div><div onClick={() => togglePanel('iot_live')}>IoT Live Tracking</div></div>}
           </div>
-
-          <div className="lower-grid">
-            <section className="panel" id="markers-section">
-              <div className="panel-head"><div className="panel-title"><Crosshair size={14} color="#34746a" /> Yüzey işaretleri <span className="panel-kicker">{markers.length} kayıtlı</span></div><button className="btn btn-sm" onClick={() => openNewMarker()} data-testid="button-add-marker-table"><Plus size={13} /> İşaret ekle</button></div>
-              <div>
-                {markersQuery.isError && <div style={{ padding: 12 }}><ErrorBox message={`Yüzey işaretleri yüklenemedi. ${errorMessage(markersQuery.error)}`} onRetry={() => void markersQuery.refetch()} /></div>}
-                {markersQuery.isLoading ? <div style={{ padding: '4px 12px 12px' }}><div className="loading-row" /><div className="loading-row" /><div className="loading-row" /></div> : markers.length ? <div style={{ overflowX: 'auto' }}><table className="marker-table"><thead><tr><th>İşaret</th><th>Altyapı</th><th>Koordinatlar</th><th>Güven</th><th>Kayıt tarihi</th><th style={{ textAlign: 'right' }}>İşlemler</th></tr></thead><tbody>{markers.map((marker) => <tr key={marker.id} data-testid={`row-marker-${marker.id}`} onClick={() => setSelectedMarker(marker.id)}><td><strong>{marker.name}</strong><div style={{ color: '#8b9690', fontSize: 9, marginTop: 3, textTransform: 'capitalize' }}>{enumLabel(marker.type)}</div></td><td><span className="utility-pill">{enumLabel(marker.utilityType)}</span></td><td className="mono" style={{ fontSize: 9 }}>{marker.lat.toFixed(5)}, {marker.lon.toFixed(5)}</td><td><div className="confidence">{Math.round(marker.confidence * 100)}%<span className="conf-track"><i style={{ width: `${marker.confidence * 100}%` }} /></span></div></td><td className="mono" style={{ fontSize: 9, color: '#83908b' }}>{formatDate(marker.createdAt)}</td><td><div className="table-actions"><button className="icon-btn" title="İşareti düzenle" onClick={(e) => { e.stopPropagation(); openEditMarker(marker); }} data-testid={`button-edit-marker-${marker.id}`}><Edit3 size={13} /></button><button className="icon-btn" title="İşareti sil" onClick={(e) => { e.stopPropagation(); removeMarker(marker); }} data-testid={`button-delete-marker-${marker.id}`}><Trash2 size={13} /></button></div></td></tr>)}</tbody></table></div> : !markersQuery.isError && <div className="empty-state" style={{ margin: 12 }}>Henüz yüzey işareti kaydedilmedi. Sahada gözlemlediğiniz rögar, vana, trafo veya yangın musluğunu ekleyin.</div>}
-              </div>
-            </section>
-            <section className="panel">
-              <div className="panel-head"><div className="panel-title"><Activity size={14} color="#34746a" /> Güven profili</div><span className="panel-kicker">Çalışma alanı ortalaması</span></div>
-              <div className="panel-body">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><div><div className="metric-value" style={{ fontSize: 28 }}>{dashboard.data ? `${Math.round(dashboard.data.averageConfidence * 100)}%` : '—'}</div><div className="hint" style={{ marginTop: 3 }}>Kaydedilen yüzey bulgularının ortalaması</div></div><div className="metric-icon" style={{ width: 42, height: 42 }}><Gauge size={19} /></div></div>
-                <div style={{ height: 5, borderRadius: 9, background: '#e5e5da', margin: '14px 0 8px', overflow: 'hidden' }}><div style={{ width: `${Math.min(100, (dashboard.data?.averageConfidence ?? 0) * 100)}%`, height: '100%', background: '#438275', borderRadius: 9 }} /></div>
-                <div className="hint">Güven puanı, yüzey işaretinin gözlem kalitesini gösterir; yeraltı hatlarının konumunu doğrulamaz.</div>
-              </div>
-            </section>
+          <div className="menu-wrap" style={{position:'relative'}} onClick={(e) => {e.stopPropagation(); setOpenMenu(openMenu === 'sim' ? null : 'sim')}}>
+            <span className={openMenu === 'sim' ? 'menu-active' : ''}>Simulation</span>
+            {openMenu === 'sim' && <div className="cad-dropdown"><div onClick={() => togglePanel('fluid_sim')}>Fluid Dynamics (Spill)</div><div onClick={() => togglePanel('cost_calc')}>BIM Cost Estimator</div></div>}
           </div>
-
-          <section className="api-panel" style={{ marginTop: 16 }}>
-            <div className="api-head" onClick={() => setApiExpanded((open) => !open)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setApiExpanded((open) => !open); }} data-testid="toggle-api-example"><div className="panel-title"><CircleHelp size={14} color="#34746a" /> API hızlı başvuru <span className="panel-kicker">REST · /api</span></div>{apiExpanded ? <X size={14} /> : <ChevronDown size={15} />}</div>
-            {apiExpanded && <div className="api-body">
-              <div className="hint">REST API; JSON varlık listesi ve GIS/BIM araçları için GeoJSON hat geometrisi sunar. Yeraltı hatları sentetik tahmindir, GPR ölçümü değildir. GeoJSON koordinatları WGS84/EPSG:4326 biçiminde [boylam, enlem] sırasındadır; BIM projesinin koordinat sistemine dönüştürün.</div>
-              <div className="api-example">{`GET  /api/v1/markers\nPOST /api/v1/predictions   { markerAId, markerBId }\nGET  /api/v1/assets?lat=40.99&lon=29.03&radius=50\nGET  /api/v1/assets.geojson?lat=40.99&lon=29.03&radius=50\nPOST /api/v1/zones/{id}/analyze`}</div>
-              <div className="api-doc-label">GIS/BIM istemcisi için örnek istek</div>
-              <div className="api-example">{`curl -H "Accept: application/geo+json" \\\n  "https://<API_HOST>/api/v1/assets.geojson?lat=40.99032&lon=29.02715&radius=50"`}</div>
-              <div className="api-doc-label">Örnek GeoJSON yanıtı · temsili</div>
-              <pre className="api-example api-json-example">{`{\n  "type": "FeatureCollection",\n  "features": [{\n    "type": "Feature",\n    "geometry": {\n      "type": "LineString",\n      "coordinates": [[29.02715, 40.99032], [29.02779, 40.99065]]\n    },\n    "properties": {\n      "id": "asset-id", "utilityType": "gas", "depthMeters": 1.2,\n      "confidence": 0.72, "dataSource": "ai_prediction", "riskLevel": 5,\n      "createdAt": "2026-10-08T12:00:00.000Z"\n    }\n  }]\n}`}</pre>
-              <div className="api-note">Bu uç, eklentiye hazır veri sağlar; AutoCAD/Revit eklentisi bu MVP’nin parçası değildir. Sağlık durumu: {health.isLoading ? 'denetleniyor…' : health.isError ? 'kullanılamıyor' : health.data?.status ?? 'bilinmiyor'}.</div>
-            </div>}
-          </section>
+          <div className="menu-wrap" style={{position:'relative'}} onClick={(e) => {e.stopPropagation(); setOpenMenu(openMenu === 'geo' ? null : 'geo')}}>
+            <span className={openMenu === 'geo' ? 'menu-active' : ''}>Geophysics</span>
+            {openMenu === 'geo' && <div className="cad-dropdown"><div onClick={() => togglePanel('sinkhole_ai')}>Sinkhole / Void Detection</div><div>GPR Radargram Viewer</div></div>}
+          </div>
+          <div className="menu-wrap" style={{position:'relative'}} onClick={(e) => {e.stopPropagation(); setOpenMenu(openMenu === 'help' ? null : 'help')}}>
+            <span className={openMenu === 'help' ? 'menu-active' : ''}>Help</span>
+            {openMenu === 'help' && <div className="cad-dropdown"><div>GeoSuelo.AI Documentation</div><div>Check for Updates</div><div>About</div></div>}
+          </div>
         </div>
-      </main>
+      </div>
 
-      {markerDialog && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setMarkerDialog(null); }}>
-        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="marker-modal-title">
-          <div className="modal-top"><div><div className="modal-title" id="marker-modal-title">{markerDialog === 'new' ? 'Yüzey işareti kaydet' : 'Yüzey işaretini düzenle'}</div><div className="modal-sub">Ekibin yüzeyde doğrulayabildiği bulguları kaydedin.</div></div><button className="icon-btn" onClick={() => setMarkerDialog(null)} aria-label="İşaret formunu kapat"><X size={17} /></button></div>
-          <div className="modal-content">
-            <div className="field-block"><label className="field-label" htmlFor="marker-name">İşaret adı</label><input className="field" id="marker-name" value={markerForm.name} onChange={(e) => setMarkerForm({ ...markerForm, name: e.target.value })} placeholder="Örn. Moda vana odası" data-testid="input-marker-name" /></div>
-            <div className="field-grid">
-              <div className="field-block"><label className="field-label" htmlFor="marker-type">Yüzey işareti türü</label><select className="select" id="marker-type" value={markerForm.type} onChange={(e) => setMarkerForm({ ...markerForm, type: e.target.value as SurfaceMarkerInput['type'] })} data-testid="select-marker-type">{MARKER_OPTIONS.map((option) => <option value={option} key={option}>{enumLabel(option)}</option>)}</select></div>
-              <div className="field-block"><label className="field-label" htmlFor="marker-utility">Altyapı türü</label><select className="select" id="marker-utility" value={markerForm.utilityType} onChange={(e) => setMarkerForm({ ...markerForm, utilityType: e.target.value as SurfaceMarkerInput['utilityType'] })} data-testid="select-marker-utility">{UTILITY_OPTIONS.map((option) => <option value={option} key={option}>{enumLabel(option)}</option>)}</select></div>
+      {/* 2. TOOLBAR (Küçük CAD İkonları) */}
+      <div className="cad-toolbar">
+        <button className={activePointerTool === 'select' ? 'active-tool' : ''} title="Select Tool" onClick={() => setActivePointerTool('select')}><MousePointer2 size={14} color={activePointerTool === 'select' ? '#007acc' : '#c8c8c8'} /></button>
+        <button className={activePointerTool === 'pan' ? 'active-tool' : ''} title="Pan Tool" onClick={() => setActivePointerTool('pan')}><Move size={14} color={activePointerTool === 'pan' ? '#007acc' : '#c8c8c8'}/></button>
+        <button className={activePointerTool === 'zoom' ? 'active-tool' : ''} title="Zoom Tool" onClick={() => setActivePointerTool('zoom')}><ZoomIn size={14} color={activePointerTool === 'zoom' ? '#007acc' : '#c8c8c8'}/></button>
+        <div className="cad-divider"></div>
+        <button title="Add Surface Marker" onClick={() => openNewMarker()}><Crosshair size={14} /></button>
+        <button title="Kazı Alanı Çiz (Serbest Çokgen)" onClick={startZone}><Scan size={14} /></button>
+        <button title="Kazı Alanını Temizle" onClick={() => setZonePoints([])}><Trash2 size={14} color="#ff3333" /></button>
+        <button className={activePanels.includes('ar_camera') ? 'active-tool' : ''} title="AR / Camera Sync" onClick={() => togglePanel('ar_camera')}><Video size={14} color={activePanels.includes('ar_camera') ? '#0f0' : undefined} /></button>
+        <button className={activePanels.includes('drone_lidar') ? 'active-tool' : ''} title="Drone Lidar Import" onClick={() => togglePanel('drone_lidar')}><Aperture size={14} color={activePanels.includes('drone_lidar') ? '#0ff' : undefined} /></button>
+        <div className="cad-divider"></div>
+        <button className={activePanels.includes('time_machine') ? 'active-tool' : ''} title="4D Digital Twin" onClick={() => togglePanel('time_machine')}><History size={14} color="#fff" /></button>
+        <button className={activePanels.includes('sinkhole_ai') ? 'active-tool' : ''} title="Sinkhole AI (Geophysics)" onClick={() => togglePanel('sinkhole_ai')}><AlertOctagon size={14} color="#ff3333" /></button>
+        <button className={activePanels.includes('fluid_sim') ? 'active-tool' : ''} title="Run Taşkın Simülasyonu" onClick={() => togglePanel('fluid_sim')}><Waves size={14} color="#1e90ff" /></button>
+        <button className={activePanels.includes('cost_calc') ? 'active-tool' : ''} title="Run BIM Cost Calculation" onClick={() => togglePanel('cost_calc')}><Calculator size={14} color="#bd8537" /></button>
+        <div className="cad-divider"></div>
+        <button
+          className={streetViewMode !== 'map' ? 'active-tool' : ''}
+          style={{
+            background: streetViewMode !== 'map' ? '#007acc' : '#222',
+            borderColor: streetViewMode !== 'map' ? '#0098ff' : '#444',
+            color: '#fff',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            fontSize: 11,
+            padding: '2px 8px'
+          }}
+          title="360° Sokak Görünümü (Zeminden Waypoint At)"
+          onClick={() => setStreetViewMode(streetViewMode === 'map' ? 'split' : 'map')}
+        >
+          <Eye size={13} color="#00e5ff" /> <strong>360° Sokak</strong>
+        </button>
+        <button
+          style={{
+            background: streetViewMode === 'split' ? '#0284c7' : '#1e1e1e',
+            color: '#fff',
+            fontSize: 10,
+            padding: '2px 6px',
+            border: '1px solid #444'
+          }}
+          title="Bölünmüş Ekran (360 + Harita)"
+          onClick={() => setStreetViewMode('split')}
+        >
+          Bölünmüş
+        </button>
+        <button
+          style={{
+            background: streetViewMode === 'fullscreen' ? '#0284c7' : '#1e1e1e',
+            color: '#fff',
+            fontSize: 10,
+            padding: '2px 6px',
+            border: '1px solid #444'
+          }}
+          title="Tam Ekran 360° Sokak"
+          onClick={() => setStreetViewMode('fullscreen')}
+        >
+          Tam 360°
+        </button>
+        <button
+          style={{
+            background: streetViewMode === 'map' ? '#0284c7' : '#1e1e1e',
+            color: '#fff',
+            fontSize: 10,
+            padding: '2px 6px',
+            border: '1px solid #444'
+          }}
+          title="Sadece Kuşbakışı Harita"
+          onClick={() => setStreetViewMode('map')}
+        >
+          Harita
+        </button>
+      </div>
+
+      {/* 3. MAIN WORKSPACE */}
+      <div className="cad-main">
+        {/* LEFT SIDEBAR (Project Explorer) */}
+        <div className="cad-sidebar-left">
+          
+          <div className="cad-panel">
+            <div className="cad-panel-title"><FolderTree size={12} /> Project Explorer</div>
+            <div className="cad-tree">
+              <details open><summary>Base Maps</summary>
+                <div className="cad-tree-item"><input type="checkbox" checked readOnly/> CARTO Dark Matter (Default)</div>
+                <div className="cad-tree-item"><input type="checkbox" readOnly/> Esri Satellite Imagery</div>
+                <div className="cad-tree-item"><input type="checkbox" readOnly/> OpenStreetMap Topo</div>
+              </details>
+              <details open><summary>Underground Utilities (Assets)</summary>
+                <div className="cad-tree-item"><input type="checkbox" checked readOnly/> <span style={{color:'#1e90ff'}}>■</span> Water (İSKİ) [{dashboard.data?.assetCount ?? 0}]</div>
+                <div className="cad-tree-item"><input type="checkbox" checked readOnly/> <span style={{color:'#ffcc00'}}>■</span> Gas (İGDAŞ)</div>
+                <div className="cad-tree-item"><input type="checkbox" checked readOnly/> <span style={{color:'#ff3333'}}>■</span> Power (BEDAŞ)</div>
+                <div className="cad-tree-item"><input type="checkbox" checked readOnly/> <span style={{color:'#ff6600'}}>■</span> Fiber Optic</div>
+              </details>
+              <details open><summary>Surface Markers (Points)</summary>
+                <div className="cad-tree-item"><input type="checkbox" checked readOnly/> Valves & Manholes [{markers.length}]</div>
+              </details>
+              <details><summary>Geophysics & AI</summary>
+                <div className="cad-tree-item">4D Fatigue Model</div>
+                <div className="cad-tree-item">Sinkhole Anomalies</div>
+              </details>
             </div>
-            <div className="field-grid">
-              <div className="field-block"><label className="field-label" htmlFor="marker-lat">Enlem</label><input className="field mono" id="marker-lat" type="number" step="any" value={markerForm.lat} onChange={(e) => setMarkerForm({ ...markerForm, lat: Number(e.target.value) })} data-testid="input-marker-lat" /></div>
-              <div className="field-block"><label className="field-label" htmlFor="marker-lon">Boylam</label><input className="field mono" id="marker-lon" type="number" step="any" value={markerForm.lon} onChange={(e) => setMarkerForm({ ...markerForm, lon: Number(e.target.value) })} data-testid="input-marker-lon" /></div>
-            </div>
-            <div className="field-block"><label className="field-label" htmlFor="marker-confidence">Gözlem güveni · {Math.round(markerForm.confidence * 100)}%</label><input className="field" id="marker-confidence" type="range" min="0" max="1" step=".05" value={markerForm.confidence} onChange={(e) => setMarkerForm({ ...markerForm, confidence: Number(e.target.value) })} data-testid="input-marker-confidence" /></div>
-            {markerError && <div className="form-error">{markerError}</div>}
-            {(createMarker.isError || updateMarker.isError) && !markerError && <div className="form-error">İşaret kaydedilemedi. Bağlantıyı kontrol edip yeniden deneyin.</div>}
           </div>
-          <div className="modal-actions"><button className="btn" onClick={() => setMarkerDialog(null)}>İptal</button><button className="btn btn-primary" onClick={saveMarker} disabled={createMarker.isPending || updateMarker.isPending} data-testid="button-save-marker">{createMarker.isPending || updateMarker.isPending ? 'Kaydediliyor…' : <><Check size={14} /> İşareti kaydet</>}</button></div>
+
+          <div className="cad-panel cad-properties">
+            <div className="cad-panel-title"><SlidersHorizontal size={12} /> Properties</div>
+            <div className="cad-prop-grid">
+              <div className="cad-prop-row"><span>Coordinate System</span><span>EPSG:4326</span></div>
+              <div className="cad-prop-row"><span>Center Lat</span><span>{searchCenter.lat.toFixed(5)}</span></div>
+              <div className="cad-prop-row"><span>Center Lon</span><span>{searchCenter.lon.toFixed(5)}</span></div>
+              <div className="cad-prop-row"><span>Avg. Confidence</span><span>{dashboard.data ? `${Math.round(dashboard.data.averageConfidence * 100)}%` : 'N/A'}</span></div>
+            </div>
+          </div>
+
+          <div className="cad-panel cad-properties" style={{ marginTop: '8px' }}>
+            <div className="cad-panel-title"><Route size={12} /> Waypoint Ekle & Tahmin Et</div>
+            <div style={{ padding: '8px' }}>
+              <div style={{ marginBottom: '10px' }}>
+                 <label style={{ fontSize: '10px', color: '#ccc', marginRight: '8px' }}>Hattın Türü:</label>
+                 <select value={waypointUtility} onChange={(e) => setWaypointUtility(e.target.value as UtilityType)} style={{ background: '#111', color: '#fff', border: '1px solid #444', padding: '4px', fontSize: '11px', borderRadius: '4px', width: '100px' }}>
+                    <option value="water">💧 Su</option>
+                    <option value="gas">🔥 Doğalgaz</option>
+                    <option value="electric">⚡ Elektrik</option>
+                    <option value="fiber">🌐 Fiber</option>
+                 </select>
+              </div>
+              <button
+                className="btn"
+                style={{
+                  width: '100%',
+                  height: '24px',
+                  fontSize: '10px',
+                  marginBottom: '8px',
+                  background: streetViewMode !== 'map' ? '#0891b2' : '#1e293b',
+                  color: '#fff',
+                  borderColor: '#06b6d4',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 5
+                }}
+                onClick={() => setStreetViewMode(streetViewMode === 'split' ? 'map' : 'split')}
+              >
+                <Eye size={12} color="#00e5ff" />
+                {streetViewMode !== 'map' ? 'Harita Moduna Dön' : '360° Sokak Görünümünden Ekle'}
+              </button>
+              <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
+                <button 
+                  className={`btn ${activePointerTool === 'start-wp' ? 'btn-primary' : ''}`}
+                  style={{ flex: 1, height: '24px', fontSize: '10px', background: activePointerTool === 'start-wp' ? '#007acc' : '#333' }}
+                  onClick={() => setActivePointerTool('start-wp')}
+                  title="Haritaya tıklayarak başlangıç atın"
+                >
+                  📍 Başlangıç At
+                </button>
+                <button 
+                  className={`btn ${activePointerTool === 'end-wp' ? 'btn-primary' : ''}`}
+                  style={{ flex: 1, height: '24px', fontSize: '10px', background: activePointerTool === 'end-wp' ? '#007acc' : '#333' }}
+                  onClick={() => setActivePointerTool('end-wp')}
+                  title="Haritaya tıklayarak bitiş atın"
+                >
+                  🏁 Bitiş At
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: '4px', marginBottom: '8px', alignItems: 'center' }}>
+                <select className="select cad-select" value={routeFrom} onChange={(e) => { setRouteFrom(e.target.value); setRouteTo(''); }} style={{ width: '50%', fontSize: '10px', height: '22px', background: '#252526', color: '#c8c8c8', border: '1px solid #444' }}>
+                  <option value="">Başlangıç...</option>
+                  {markers.map(m => <option value={m.id} key={m.id}>{m.name}</option>)}
+                </select>
+                <select className="select cad-select" value={routeTo} onChange={(e) => setRouteTo(e.target.value)} style={{ width: '50%', fontSize: '10px', height: '22px', background: '#252526', color: '#c8c8c8', border: '1px solid #444' }}>
+                  <option value="">Bitiş...</option>
+                  {compatibleMarkers.map(m => <option value={m.id} key={m.id}>{m.name}</option>)}
+                </select>
+              </div>
+              <button className="btn btn-primary" style={{ width: '100%', height: '24px', fontSize: '10px' }} onClick={runPrediction} disabled={!routeFrom || !routeTo || routeFrom === routeTo}>
+                ⚡ Yeraltı Hattını Tahmin Et
+              </button>
+              <button className="btn" style={{ width: '100%', height: '24px', fontSize: '10px', marginTop: '6px', color: '#ff3333', borderColor: '#ff3333' }} onClick={clearPredictions}>
+                <Trash2 size={10} style={{marginRight: 4}}/> Eklenen (AI) Çizimleri Sil
+              </button>
+</div>
+          </div>
+
+          <div className="cad-panel cad-properties" style={{ marginTop: '8px' }}>
+            <div className="cad-panel-title"><Triangle size={12} /> Kazı Alanı</div>
+            <div style={{ padding: '8px' }}>
+              {!zoneDrawing ? (
+                <button className="btn btn-primary" style={{ width: '100%', height: '24px', fontSize: '10px', background: '#bd8537', borderColor: '#bd8537' }}
+                  onClick={() => { setActivePointerTool('select'); startZone(); }}>
+                  ⛏ Kazı Alanı Ekle
+                </button>
+              ) : (
+                <>
+                  <div style={{ fontSize: '10px', color: '#ffcc00', marginBottom: '6px' }}>
+                    Haritaya tıklayarak köşe ekleyin · {zonePoints.length} nokta{zonePoints.length < 3 ? ' (en az 3)' : ''}
+                  </div>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button className="btn btn-primary" style={{ flex: 1, height: '24px', fontSize: '10px' }} disabled={zonePoints.length < 3}
+                      onClick={() => { setZoneName(`Kazı Alanı ${zones.length + 1}`); setZoneDialog(true); }}>
+                      ✔ Bitir & Kaydet
+                    </button>
+                    <button className="btn" style={{ height: '24px', fontSize: '10px', background: '#333' }} disabled={!zonePoints.length}
+                      onClick={() => setZonePoints((prev) => prev.slice(0, -1))} title="Son noktayı geri al">
+                      ↶
+                    </button>
+                    <button className="btn" style={{ height: '24px', fontSize: '10px', background: '#333', color: '#ff6666' }}
+                      onClick={() => { setZoneDrawing(false); setZonePoints([]); }}>
+                      İptal
+                    </button>
+                  </div>
+                </>
+              )}
+              {zones.length > 0 && (
+                <select className="select cad-select" value={selectedZone} onChange={(e) => setSelectedZone(e.target.value)}
+                  style={{ width: '100%', marginTop: '8px', fontSize: '10px', height: '22px', background: '#252526', color: '#c8c8c8', border: '1px solid #444' }}>
+                  <option value="">Kayıtlı alanlar ({zones.length})</option>
+                  {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+                </select>
+              )}
+            </div>
+          </div>
         </div>
-      </div>}
-      {zoneDialog && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setZoneDialog(false); }}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="zone-modal-title">
-        <div className="modal-top"><div><div className="modal-title" id="zone-modal-title">Kazı bölgesini kaydet</div><div className="modal-sub">Tahmini hatlarla olası çakışmaları incelemek için sınırı kaydedin.</div></div><button className="icon-btn" onClick={() => setZoneDialog(false)} aria-label="Bölge formunu kapat"><X size={17} /></button></div>
-        <div className="modal-content"><div className="field-block"><label className="field-label" htmlFor="zone-name">Bölge adı</label><input className="field" id="zone-name" value={zoneName} onChange={(e) => setZoneName(e.target.value)} placeholder="Örn. Moda sokak yenileme · Bölüm 04" data-testid="input-zone-name" /></div><div className="hint">{zonePoints.length} köşe noktası eklendi. Risk analizi, bu sınırı haritalanmış tahmini hatlarla karşılaştırır.</div><div className="zone-vertex-list">{zonePoints.map((point, i) => <span className="vertex-chip" key={`${point.lat}-${point.lon}`}>N{i + 1} {point.lat.toFixed(4)}, {point.lon.toFixed(4)}</span>)}</div>{createZone.isError && <div className="form-error">Bölge kaydedilemedi. {errorMessage(createZone.error)}</div>}</div>
-        <div className="modal-actions"><button className="btn" onClick={() => setZoneDialog(false)}>İptal</button><button className="btn btn-primary" onClick={saveZone} disabled={!zoneName.trim() || zonePoints.length < 3 || createZone.isPending} data-testid="button-save-zone">{createZone.isPending ? 'Kaydediliyor…' : <><Check size={14} /> Bölgeyi kaydet</>}</button></div>
+
+        {/* WORKSPACE VIEW (360 STREET VIEW & CAD MAP) */}
+        <div className="cad-canvas" style={{ display: 'flex', flexDirection: 'row', width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
+          {/* 360 STREET VIEW PANE */}
+          {(streetViewMode === 'split' || streetViewMode === 'fullscreen') && (
+            <div style={{
+              flex: streetViewMode === 'split' ? '1 1 50%' : '1 1 100%',
+              height: '100%',
+              position: 'relative',
+              borderRight: streetViewMode === 'split' ? '2px solid #007acc' : 'none',
+              overflow: 'hidden'
+            }}>
+              <StreetView360
+                center={searchCenter}
+                onCenterChange={(coord) => {
+                  setSearchCenter(coord);
+                  setSearchLat(coord.lat.toFixed(6));
+                  setSearchLon(coord.lon.toFixed(6));
+                }}
+                markers={markers}
+                assets={visibleAssets}
+                onAddWaypoint={handleStreetWaypoint}
+                activeTool={activePointerTool === 'start-wp' || activePointerTool === 'end-wp' ? activePointerTool : 'select'}
+                setActiveTool={setActivePointerTool}
+                selectedUtility={waypointUtility}
+                isSplit={streetViewMode === 'split'}
+                onToggleSplit={() => setStreetViewMode(streetViewMode === 'split' ? 'fullscreen' : 'split')}
+                onClose={() => setStreetViewMode('map')}
+              />
+            </div>
+          )}
+
+          {/* 2D MAP PANE */}
+          {(streetViewMode === 'split' || streetViewMode === 'map') && (
+            <div style={{
+              flex: streetViewMode === 'split' ? '1 1 50%' : '1 1 100%',
+              height: '100%',
+              position: 'relative',
+              overflow: 'hidden'
+            }}>
+              <MapContainer center={[MAP.lat, MAP.lon]} zoom={15} minZoom={3} maxZoom={20} zoomControl={false} scrollWheelZoom className="leaflet-map" style={{ height: '100%', background: '#111' }}>
+                <LayersControl position="topright">
+                  <LayersControl.BaseLayer checked name="Standart OSM">
+                    <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                  </LayersControl.BaseLayer>
+                  <LayersControl.BaseLayer name="Apple Tarzı (Carto Voyager)">
+                    <TileLayer attribution='&copy; CARTO' url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png" />
+                  </LayersControl.BaseLayer>
+                  <LayersControl.BaseLayer name="Topoğrafik (Esri Topo)">
+                    <TileLayer attribution='&copy; Esri' url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}" />
+                  </LayersControl.BaseLayer>
+                  <LayersControl.BaseLayer name="Karanlık Mod (Dark)">
+                    <TileLayer attribution='&copy; CARTO' url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png" />
+                  </LayersControl.BaseLayer>
+                  <LayersControl.BaseLayer name="Uydu (Esri Satellite)">
+                    <TileLayer attribution='&copy; Esri' url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
+                  </LayersControl.BaseLayer>
+                </LayersControl>
+                <MapSizeInvalidator />
+                <MapViewport center={searchCenter} zoom={viewZoom} onCenterChange={(coordinate) => {
+                  setSearchCenter((previous) => Math.abs(previous.lat - coordinate.lat) < 0.00002 && Math.abs(previous.lon - coordinate.lon) < 0.00002 ? previous : coordinate);
+                  setSearchLat(coordinate.lat.toFixed(6));
+                  setSearchLon(coordinate.lon.toFixed(6));
+                }} onZoomChange={setViewZoom} />
+                <MapClickHandler onCoordinateClick={onMapCoordinateClick} />
+                <ScaleControl position="bottomright" imperial={false} />
+                {visibleAssets.map((asset) => (
+                  <Polyline key={asset.id} positions={[[asset.start.lat, asset.start.lon] as [number, number], [asset.end.lat, asset.end.lon] as [number, number]]} pathOptions={{ color: UTILITY_COLORS[asset.utilityType] ?? '#c74739', weight: 4, opacity: 0.9, dashArray: '8 7', lineCap: 'round' }}>
+                    <Tooltip sticky direction="top" opacity={0.9}>
+                      <div style={{ background: '#252526', padding: '6px', border: '1px solid #444', borderRadius: '4px', minWidth: '180px' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 'bold', color: UTILITY_COLORS[asset.utilityType] ?? '#fff', borderBottom: '1px solid #444', paddingBottom: '4px', marginBottom: '4px' }}>
+                          {asset.utilityType === 'water' ? '💧 Ana Su Hattı (İSKİ)' : asset.utilityType === 'gas' ? '🔥 Doğalgaz (İGDAŞ)' : asset.utilityType === 'electric' ? '⚡ Yüksek Gerilim (BEDAŞ)' : asset.utilityType === 'fiber' ? '🌐 Fiber Optik (Telekom)' : asset.utilityType === 'sewer' ? '💩 Kanalizasyon' : 'Yer Altı Hattı'}
+                        </div>
+                        <div style={{ fontSize: '10px', color: '#ccc', lineHeight: '1.4' }}>
+                          <div><strong>Derinlik:</strong> -{(asset.depthMeters ?? 1.4).toFixed(1)}m</div>
+                          <div><strong>Malzeme:</strong> {asset.utilityType === 'gas' ? 'Çelik (PE)' : 'HDPE-100'}</div>
+                          <div><strong>Risk:</strong> <span style={{color: asset.utilityType === 'gas' ? '#ff3333' : '#ffcc00'}}>Kritik (Kazı Yasak)</span></div>
+                        </div>
+                      </div>
+                    </Tooltip>
+                  </Polyline>
+                ))}
+                {zones.map((zone) => <Polygon key={zone.id} positions={zone.polygon.map((point) => [point.lat, point.lon] as [number, number])} pathOptions={{ color: zone.id === selectedZone ? '#a66a25' : '#bd8537', weight: 1, dashArray: '7 5', fillColor: '#d4a04a', fillOpacity: zone.id === selectedZone ? 0.3 : 0.15 }} />)}
+                {zonePoints.length >= 3
+                  ? <Polygon positions={zonePoints.map((point) => [point.lat, point.lon] as [number, number])} pathOptions={{ color: '#bd8537', weight: 1, dashArray: '5 4', fillColor: '#d4a04a', fillOpacity: 0.2 }} />
+                  : zonePoints.length >= 2 && <Polyline positions={zonePoints.map((point) => [point.lat, point.lon] as [number, number])} pathOptions={{ color: '#bd8537', weight: 1, dashArray: '5 4' }} />}
+                {zonePoints.map((point, index) => <CircleMarker key={`draft-${index}`} center={[point.lat, point.lon]} radius={4} pathOptions={{ color: '#fff', weight: 1, fillColor: '#c68d3e', fillOpacity: 1 }} />)}
+                {markers.map((marker) => {
+                  return (
+                    <Marker key={marker.id} position={[marker.lat, marker.lon]} icon={markerIcon(marker.type, marker.name, selectedMarker === marker.id, marker.utilityType)} eventHandlers={{ click: () => setSelectedMarker(marker.id) }} title={`${marker.name} · ${enumLabel(marker.utilityType)}`} bubblingMouseEvents={false}>
+                      <Popup closeButton={false} offset={[2, -22]}>
+                        <div style={{ minWidth: 150, fontSize: 11 }}>
+                          <div style={{ fontWeight: 'bold', marginBottom: 2 }}>{marker.name}</div>
+                          <div style={{ color: '#666', marginBottom: 8 }}>{enumLabel(marker.type)} · {enumLabel(marker.utilityType)}</div>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); deleteWaypoint(marker); }}
+                            disabled={deleteMarker.isPending}
+                            style={{ width: '100%', padding: '4px 8px', background: '#ff3333', color: '#fff', border: 'none', borderRadius: 3, cursor: 'pointer', fontSize: 11, fontWeight: 'bold' }}
+                          >
+                            🗑 Sil
+                          </button>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  );
+                })}
+              </MapContainer>
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT SIDEBAR (Analysis / Active Panel Content) - Sadece ihtiyaç olunca açılır (gizli tutalım ki sade olsun) */}
+      </div>
+
+      
+      
+      {clashWarning && (
+        <div style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', background: clashWarning.includes('DİKKAT') ? '#ff3333' : '#28a745', color: '#fff', padding: '12px 24px', borderRadius: '4px', zIndex: 4000, boxShadow: '0 5px 15px rgba(0,0,0,0.5)', fontWeight: 'bold', border: '2px solid #fff' }}>
+          {clashWarning.includes('DİKKAT') ? <AlertOctagon size={18} style={{verticalAlign:'middle', marginRight: 8}}/> : <ShieldCheck size={18} style={{verticalAlign:'middle', marginRight: 8}}/>}
+          {clashWarning}
+          <button style={{ marginLeft: '16px', background: 'transparent', border: '1px solid #fff', color: '#fff', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }} onClick={() => setZonePoints([])}>Alanı Sil</button>
+        </div>
+      )}
+
+      {/* ANALYSIS DIALOGS (CAD Floating Windows) */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 3000, pointerEvents: 'none', overflow: 'hidden' }}>
+        
+        {activePanels.includes('ar_camera') && (
+          <Draggable nodeRef={arRef} handle=".handle-ar">
+            <div ref={arRef} style={{ position: 'absolute', top: '80px', right: '50px', width: '380px', background: '#252526', border: '1px solid #444', boxShadow: '0 10px 30px rgba(0,0,0,0.7)', pointerEvents: 'auto' }}>
+              <div className="handle-ar" style={{ cursor: 'move', background: '#333', padding: '6px 10px', fontSize: '11px', color: '#fff', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #111' }}>
+                <span><Video size={12} color="#0f0" style={{verticalAlign:'middle', marginRight: 6}}/> AR Camera Sync</span>
+                <X size={14} style={{ cursor: 'pointer', color: '#aaa' }} onClick={(e) => { e.stopPropagation(); togglePanel('ar_camera'); }} />
+              </div>
+              <div style={{ padding: '12px', fontSize: '11px', color: '#ccc' }}>
+                <div style={{ marginBottom: '8px', opacity: 0.8 }}>Camera feed connected. GPR overlay calibration ready.</div>
+                <div style={{ width: '100%', height: '180px', background: '#000', border: '1px solid #222', position: 'relative', overflow: 'hidden' }}>
+                   <div style={{ position: 'absolute', inset: 0, border: '1px solid rgba(0,255,100,0.2)', background: 'linear-gradient(180deg, rgba(0,255,100,0.1) 0%, transparent 100%)' }}>
+                     <div style={{ position: 'absolute', top: '40%', left: '-20%', width: '150%', height: 4, background: '#1e90ff', transform: 'rotate(15deg)', boxShadow: '0 0 10px #1e90ff' }}></div>
+                     <div style={{ position: 'absolute', top: '36%', left: '30%', background: 'rgba(0,0,0,0.8)', color: '#1e90ff', padding: '2px 4px', fontSize: 10 }}>İSKİ SU (-1.4m)</div>
+                     <div style={{ position: 'absolute', top: '65%', left: '-20%', width: '150%', height: 3, background: '#ffcc00', transform: 'rotate(-5deg)', boxShadow: '0 0 10px #ffcc00' }}></div>
+                     <div style={{ position: 'absolute', top: '62%', left: '40%', background: 'rgba(0,0,0,0.8)', color: '#ffcc00', padding: '2px 4px', fontSize: 10 }}>İGDAŞ GAZ (-1.2m)</div>
+                     <div className="ar-scanline"></div>
+                   </div>
+                </div>
+                <button className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }}>Capture Point Cloud</button>
+              </div>
+            </div>
+          </Draggable>
+        )}
+
+        {activePanels.includes('drone_lidar') && (
+          <Draggable nodeRef={lidarRef} handle=".handle-lidar">
+            <div ref={lidarRef} style={{ position: 'absolute', top: '120px', right: '400px', width: '380px', background: '#252526', border: '1px solid #444', boxShadow: '0 10px 30px rgba(0,0,0,0.7)', pointerEvents: 'auto' }}>
+              <div className="handle-lidar" style={{ cursor: 'move', background: '#333', padding: '6px 10px', fontSize: '11px', color: '#fff', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #111' }}>
+                <span><Aperture size={12} color="#0ff" style={{verticalAlign:'middle', marginRight: 6}}/> Lidar / Point Cloud</span>
+                <X size={14} style={{ cursor: 'pointer', color: '#aaa' }} onClick={(e) => { e.stopPropagation(); togglePanel('drone_lidar'); }} />
+              </div>
+              <div style={{ padding: '12px', fontSize: '11px', color: '#ccc' }}>
+                <div style={{ border: '1px dashed #555', padding: '16px', textAlign: 'center', background: '#1e1e1e', cursor: 'pointer', marginBottom: '8px' }}>
+                  <Aperture size={20} color="#555" style={{margin:'0 auto 6px'}}/>
+                  <div>Select .LAS or .OBJ File</div>
+                </div>
+                <div style={{ background: '#2d2d30', padding: '8px', border: '1px solid #333' }}>
+                  <div style={{ color: '#0f0', marginBottom: 4 }}>✔ SANTIYE_A_DRONE.las (450MB)</div>
+                  <div style={{ fontSize: 10, opacity: 0.7 }}>DEM extraction complete. Ground levels calibrated ±2mm.</div>
+                </div>
+              </div>
+            </div>
+          </Draggable>
+        )}
+
+        {activePanels.includes('time_machine') && (
+          <Draggable nodeRef={timeRef} handle=".handle-time">
+            <div ref={timeRef} style={{ position: 'absolute', top: '160px', left: '320px', width: '380px', background: '#252526', border: '1px solid #444', boxShadow: '0 10px 30px rgba(0,0,0,0.7)', pointerEvents: 'auto' }}>
+              <div className="handle-time" style={{ cursor: 'move', background: '#333', padding: '6px 10px', fontSize: '11px', color: '#fff', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #111' }}>
+                <span><History size={12} color="#fff" style={{verticalAlign:'middle', marginRight: 6}}/> 4D BIM (Time Machine)</span>
+                <X size={14} style={{ cursor: 'pointer', color: '#aaa' }} onClick={(e) => { e.stopPropagation(); togglePanel('time_machine'); }} />
+              </div>
+              <div style={{ padding: '12px', fontSize: '11px', color: '#ccc' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: 10 }}><span>1980</span><span>2000</span><span style={{color: '#ffcc00'}}>2026 (Now)</span><span>2035</span></div>
+                <input type="range" min="1980" max="2035" defaultValue="2026" style={{ width: '100%', accentColor: '#007acc' }} />
+                <div style={{ marginTop: '12px', borderLeft: '3px solid #ffcc00', padding: '8px 10px', background: '#1e1e1e' }}>
+                   <div style={{ color: '#ffcc00', fontWeight: 'bold', marginBottom: 4 }}>Year: 2026</div>
+                   <div style={{ lineHeight: 1.4 }}>42% of Asbestos Cement (AC) pipes in this zone reached fatigue limit. 15% burst risk projected within 9 years.</div>
+                </div>
+              </div>
+            </div>
+          </Draggable>
+        )}
+
+        {activePanels.includes('sinkhole_ai') && (
+          <Draggable nodeRef={sinkholeRef} handle=".handle-sinkhole">
+            <div ref={sinkholeRef} style={{ position: 'absolute', top: '220px', left: '360px', width: '380px', background: '#252526', border: '1px solid #444', boxShadow: '0 10px 30px rgba(0,0,0,0.7)', pointerEvents: 'auto' }}>
+              <div className="handle-sinkhole" style={{ cursor: 'move', background: '#333', padding: '6px 10px', fontSize: '11px', color: '#fff', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #111' }}>
+                <span><AlertOctagon size={12} color="#ff3333" style={{verticalAlign:'middle', marginRight: 6}}/> Sinkhole Detection</span>
+                <X size={14} style={{ cursor: 'pointer', color: '#aaa' }} onClick={(e) => { e.stopPropagation(); togglePanel('sinkhole_ai'); }} />
+              </div>
+              <div style={{ padding: '12px', fontSize: '11px', color: '#ccc' }}>
+                <div style={{ background: '#000', height: '100px', position: 'relative', border: '1px solid #222', overflow: 'hidden', padding: 10, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                   <div className="blink-anim" style={{ position: 'absolute', top: '10px', left: '20px', width: '50px', height: '25px', background: 'radial-gradient(ellipse, rgba(255,51,51,0.6) 0%, transparent 70%)', borderRadius: '50%' }}></div>
+                   <div style={{ position: 'absolute', top: '15px', left: '30px', color: '#fff', fontSize: 10, fontWeight: 'bold' }}>74% RISK</div>
+                   <div style={{ position: 'absolute', top: '40px', left: '20px', right: '20px', borderTop: '1px dashed #0f0' }}></div>
+                   <div style={{ position: 'relative', zIndex: 10 }}>
+                     <div style={{ color: '#ff3333', fontWeight: 'bold', marginBottom: 2 }}>Critical Void Detected</div>
+                     <div style={{ fontSize: 9, lineHeight: 1.3 }}>1.5m depth, ~20m³ soil loss anomaly. Immediate GPR sweep recommended.</div>
+                   </div>
+                </div>
+              </div>
+            </div>
+          </Draggable>
+        )}
+
+        {activePanels.includes('fluid_sim') && (
+          <Draggable nodeRef={fluidRef} handle=".handle-fluid">
+            <div ref={fluidRef} style={{ position: 'absolute', top: '300px', right: '200px', width: '380px', background: '#252526', border: '1px solid #444', boxShadow: '0 10px 30px rgba(0,0,0,0.7)', pointerEvents: 'auto' }}>
+              <div className="handle-fluid" style={{ cursor: 'move', background: '#333', padding: '6px 10px', fontSize: '11px', color: '#fff', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #111' }}>
+                <span><Waves size={12} color="#1e90ff" style={{verticalAlign:'middle', marginRight: 6}}/> Fluid Dynamics (Spill)</span>
+                <X size={14} style={{ cursor: 'pointer', color: '#aaa' }} onClick={(e) => { e.stopPropagation(); togglePanel('fluid_sim'); }} />
+              </div>
+              <div style={{ padding: '12px', fontSize: '11px', color: '#ccc' }}>
+                <div style={{ display: 'flex', gap: 6, marginBottom: '12px' }}>
+                  <button className="btn btn-primary" style={{ flex: 1, height: '24px', fontSize: '10px' }}>Water Flow (Topography)</button>
+                  <button className="btn" style={{ flex: 1, height: '24px', fontSize: '10px' }}>Gas Plume (Wind)</button>
+                </div>
+                <div style={{ textAlign: 'center', background: '#1e1e1e', padding: '12px', border: '1px solid #333' }}>
+                  <AlertOctagon size={20} color="#ff3333" style={{ margin: '0 auto 6px' }}/>
+                  <div style={{ color: '#ff3333', fontWeight: 'bold', fontSize: 13 }}>Impact Radius: 240m</div>
+                  <div style={{ fontSize: 10, marginTop: 6, opacity: 0.8 }}>Scenario: 3-bar gas pipeline failure. SW wind prevailing. Evacuate corridor immediately.</div>
+                </div>
+              </div>
+            </div>
+          </Draggable>
+        )}
+
+        {activePanels.includes('cost_calc') && (
+          <Draggable nodeRef={costRef} handle=".handle-cost">
+            <div ref={costRef} style={{ position: 'absolute', top: '350px', left: '500px', width: '380px', background: '#252526', border: '1px solid #444', boxShadow: '0 10px 30px rgba(0,0,0,0.7)', pointerEvents: 'auto' }}>
+              <div className="handle-cost" style={{ cursor: 'move', background: '#333', padding: '6px 10px', fontSize: '11px', color: '#fff', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #111' }}>
+                <span><Calculator size={12} color="#bd8537" style={{verticalAlign:'middle', marginRight: 6}}/> BIM Cost Estimator</span>
+                <X size={14} style={{ cursor: 'pointer', color: '#aaa' }} onClick={(e) => { e.stopPropagation(); togglePanel('cost_calc'); }} />
+              </div>
+              <div style={{ padding: '12px', fontSize: '11px', color: '#ccc' }}>
+                <table className="cad-table" style={{ marginBottom: '10px' }}>
+                  <thead><tr><th>BoQ Item</th><th>Qty</th><th>Cost</th></tr></thead>
+                  <tbody>
+                    <tr><td>15.120/K (Excavation)</td><td>450 m³</td><td>₺64.5K</td></tr>
+                    <tr><td>17.144/A (Asphalt Cut)</td><td>120 m²</td><td>₺18.2K</td></tr>
+                    <tr><td style={{color:'#ff3333'}}>Gas Relocation (Risk)</td><td style={{color:'#ff3333'}}>45 m</td><td style={{color:'#ff3333'}}>₺185K</td></tr>
+                  </tbody>
+                </table>
+                <div style={{ background: '#bd8537', padding: '6px 10px', color: '#fff', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Total Est. Budget:</span><span>₺267,700</span>
+                </div>
+                <button className="btn" style={{ width: '100%', marginTop: '10px', height: '24px', fontSize: '10px' }}>Export to Excel</button>
+              </div>
+            </div>
+          </Draggable>
+        )}
+      </div>
+      
+      {/* 4. BOTTOM PANEL (Console & Data Table) */}
+      <div className="cad-bottom-panel">
+        <div className="cad-tabs">
+          <span className={`cad-tab ${activeBottomTab === 'table' ? 'active' : ''}`} onClick={() => setActiveBottomTab('table')}><Database size={12} /> Data Table (Surface Markers)</span>
+          <span className={`cad-tab ${activeBottomTab === 'console' ? 'active' : ''}`} onClick={() => setActiveBottomTab('console')}><TerminalSquare size={12} /> Output Console</span>
+          <span className={`cad-tab ${activeBottomTab === 'clash' ? 'active' : ''}`} onClick={() => setActiveBottomTab('clash')}><AlertOctagon size={12} /> Clash & Risk Report</span>
+        </div>
+        <div className="cad-table-container">
+          {activeBottomTab === 'console' && (
+            <div style={{ padding: '10px', fontFamily: 'monospace', fontSize: '11px', color: '#0f0', background: '#111', height: '100%', overflowY: 'auto' }}>
+              <div>[14:52:10] GeoSuelo.AI Backend Connected.</div>
+              <div>[14:52:11] Syncing GPR radar datasets... OK (42 ms)</div>
+              <div>[14:55:04] Workspace coordinate loaded: EPSG:4326.</div>
+              <div style={{ color: '#0ff' }}>[14:59:12] Map layer changed to Apple Maps (Carto Voyager).</div>
+              <div style={{ color: '#ffcc00' }}>[15:10:33] WARNING: Missing calibration for Drone Lidar node #814.</div>
+              <div>[15:21:40] Ready for commands.</div>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}><span style={{color: '#aaa'}}>&gt;</span><input type="text" style={{ background: 'transparent', border: 'none', color: '#fff', outline: 'none', width: '100%', fontFamily: 'monospace' }} placeholder="Type command..." /></div>
+            </div>
+          )}
+          {activeBottomTab === 'clash' && (
+            <div style={{ padding: '16px', background: '#1e1e1e', height: '100%' }}>
+              <div style={{ borderLeft: '4px solid #ff3333', padding: '12px', background: '#2d2d30', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ color: '#ff3333', fontWeight: 'bold', fontSize: '13px' }}>CRITICAL CLASH: Water Pipe intersects Gas Main</div>
+                  <div style={{ fontSize: '11px', color: '#aaa', marginTop: '4px' }}>Zone 04 (Kadikoy) - Lat: 40.985, Lon: 29.023. Depth delta &lt; 0.2m!</div>
+                </div>
+                <button className="btn btn-primary" style={{ height: '30px', background: '#ff3333', borderColor: '#ff3333' }}>Isolate Area</button>
+              </div>
+              <div style={{ borderLeft: '4px solid #ffcc00', padding: '12px', background: '#2d2d30', display: 'flex', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ color: '#ffcc00', fontWeight: 'bold', fontSize: '13px' }}>WARNING: Excavation near Fiber Optic Line</div>
+                  <div style={{ fontSize: '11px', color: '#aaa', marginTop: '4px' }}>Excavator EX-04 is within 2.5m of TTNET Fiber backbone.</div>
+                </div>
+                <button className="btn" style={{ height: '30px' }}>Send Alert</button>
+              </div>
+            </div>
+          )}
+          {activeBottomTab === 'table' && (
+            markers.length ? (
+              <table className="cad-table">
+                <thead><tr><th>ID</th><th>Name</th><th>Utility Type</th><th>Marker Type</th><th>Latitude</th><th>Longitude</th><th>Confidence</th></tr></thead>
+                <tbody>
+                  {markers.map(m => (
+                  <tr key={m.id} style={{ background: selectedMarker === m.id ? '#2a4454' : 'transparent' }} onClick={() => setSelectedMarker(m.id)}>
+                    <td style={{fontFamily: 'monospace'}}>{m.id.substring(0,8)}</td>
+                    <td>{m.name}</td>
+                    <td style={{color: UTILITY_COLORS[m.utilityType]}}>{m.utilityType}</td>
+                    <td>{m.type}</td>
+                    <td style={{fontFamily: 'monospace'}}>{m.lat.toFixed(6)}</td>
+                    <td style={{fontFamily: 'monospace'}}>{m.lon.toFixed(6)}</td>
+                    <td>{(m.confidence * 100).toFixed(1)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div style={{padding: 20, color: '#888', fontStyle: 'italic'}}>No surface markers found in current workspace.</div>
+          )
+        )}
+        </div>
+      </div>
+
+      {/* 5. STATUS BAR */}
+      <div className="cad-status-bar">
+        <span>Ready.</span>
+        <span>Lat: {searchLat} / Lon: {searchLon}</span>
+        <span>Radius Filter: {searchRadius}m</span>
+        <span>Zoom: {viewZoom}</span>
+        <span>Snapping: OFF</span>
+        <span>Orthomosaic: N/A</span>
+      </div>
+
+      {/* Modals from previous code */}
+      {markerDialog && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setMarkerDialog(null); }}><div className="modal cad-modal">
+        <div className="modal-top"><div><div className="modal-title">{markerDialog === 'new' ? 'Add Surface Marker' : 'Edit Surface Marker'}</div></div><button className="icon-btn" onClick={() => setMarkerDialog(null)}><X size={17} /></button></div>
+        <div className="modal-content" style={{padding: '16px'}}>
+          <div className="field-block"><label className="field-label">Name</label><input className="field" value={markerForm.name} onChange={(e) => setMarkerForm({ ...markerForm, name: e.target.value })} /></div>
+          <div className="field-grid">
+            <div className="field-block"><label className="field-label">Marker Type</label><select className="select" value={markerForm.type} onChange={(e) => setMarkerForm({ ...markerForm, type: e.target.value as any })}>{MARKER_OPTIONS.map((o) => <option value={o} key={o}>{o}</option>)}</select></div>
+            <div className="field-block"><label className="field-label">Utility Type</label><select className="select" value={markerForm.utilityType} onChange={(e) => setMarkerForm({ ...markerForm, utilityType: e.target.value as any })}>{UTILITY_OPTIONS.map((o) => <option value={o} key={o}>{o}</option>)}</select></div>
+          </div>
+          <div className="field-grid">
+            <div className="field-block"><label className="field-label">Latitude</label><input className="field mono" type="number" step="any" value={markerForm.lat} onChange={(e) => setMarkerForm({ ...markerForm, lat: Number(e.target.value) })} /></div>
+            <div className="field-block"><label className="field-label">Longitude</label><input className="field mono" type="number" step="any" value={markerForm.lon} onChange={(e) => setMarkerForm({ ...markerForm, lon: Number(e.target.value) })} /></div>
+          </div>
+          <div className="field-block"><label className="field-label">Confidence: {Math.round(markerForm.confidence * 100)}%</label><input className="field" type="range" min="0" max="1" step=".05" value={markerForm.confidence} onChange={(e) => setMarkerForm({ ...markerForm, confidence: Number(e.target.value) })} /></div>
+        </div>
+        <div className="modal-actions" style={{padding: '12px 16px', borderTop: '1px solid #444'}}><button className="btn" onClick={() => setMarkerDialog(null)}>Cancel</button><button className="btn btn-primary" onClick={saveMarker}>Save Data</button></div>
       </div></div>}
-      {toast && <div className="toast-msg" role="status">{toast}</div>}
+      
+      {zoneDialog && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setZoneDialog(false); }}><div className="modal cad-modal">
+        <div className="modal-top"><div><div className="modal-title">Save Excavation Zone</div></div><button className="icon-btn" onClick={() => setZoneDialog(false)}><X size={17} /></button></div>
+        <div className="modal-content" style={{padding: '16px'}}><div className="field-block"><label className="field-label">Zone Name</label><input className="field" value={zoneName} onChange={(e) => setZoneName(e.target.value)} /></div><div className="hint">{zonePoints.length} vertices captured.</div></div>
+        <div className="modal-actions"><button className="btn" onClick={() => setZoneDialog(false)}>Cancel</button><button className="btn btn-primary" onClick={saveZone} disabled={!zoneName.trim() || zonePoints.length < 3}>Save Zone</button></div>
+      </div></div>}
+      {toast && <div className="toast-msg" role="status" style={{background: '#333', color: '#0f0'}}>{toast}</div>}
     </div>
   );
 }
-
 function emptyMarker(center: Coordinate): SurfaceMarkerInput {
   return { name: '', lat: center.lat, lon: center.lon, type: 'manhole', utilityType: 'water', confidence: 0.75 };
 }
@@ -434,18 +1010,19 @@ function MapClickHandler({ onCoordinateClick }: { onCoordinateClick: (coordinate
   });
   return null;
 }
-function markerIcon(type: SurfaceMarker['type'], name: string, selected: boolean) {
+function markerIcon(type: SurfaceMarker['type'], name: string, selected: boolean, utilityType?: UtilityType) {
   const paths: Record<SurfaceMarker['type'], string> = {
     manhole: '<circle cx="12" cy="12" r="6.5"/><path d="M8 12h8M12 8v8"/>',
     valve: '<path d="M12 4v16M5 8l7 4 7-4M5 16l7-4 7 4"/>',
     transformer: '<path d="M13.5 2 6 13h5l-.5 9L18 10h-5z"/>',
     hydrant: '<path d="M12 22s7-7.1 7-13a7 7 0 1 0-14 0c0 5.9 7 13 7 13Z"/><circle cx="12" cy="9" r="2"/>',
   };
+  const colorAttr = utilityType ? `style="stroke: ${UTILITY_COLORS[utilityType]};"` : '';
   return L.divIcon({
     className: 'ag-pin-icon',
     iconSize: [24, 28],
     iconAnchor: [10, 26],
-    html: `<div class="ag-pin ${selected ? 'selected' : ''}"><span class="pin-core"><svg viewBox="0 0 24 24" aria-hidden="true">${paths[type]}</svg></span><span class="marker-label">${escapeHtml(name)}</span></div>`,
+    html: `<div class="ag-pin ${selected ? 'selected' : ''}"><span class="pin-core"><svg viewBox="0 0 24 24" aria-hidden="true" ${colorAttr}>${paths[type]}</svg></span><span class="marker-label">${escapeHtml(name)}</span></div>`,
   });
 }
 function escapeHtml(value: string) {

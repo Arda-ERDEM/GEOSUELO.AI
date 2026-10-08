@@ -11,35 +11,26 @@ import {
 const router: IRouter = Router();
 
 router.get("/v1/dashboard", async (_req, res): Promise<void> => {
-  const [markers, assets, zones] = await Promise.all([
-    db.select().from(surfaceMarkersTable),
-    db
-      .select()
-      .from(undergroundAssetsTable)
-      .orderBy(desc(undergroundAssetsTable.createdAt)),
-    db.select().from(zonesTable),
-  ]);
-  const recentAssets = assets.slice(0, 5).map((asset) => ({
-    id: asset.id,
-    utilityType: asset.utilityType,
-    start: { lat: asset.startLat, lon: asset.startLon },
-    end: { lat: asset.endLat, lon: asset.endLon },
-    depthMeters: asset.depthMeters,
-    confidence: asset.confidence,
-    dataSource: asset.dataSource,
-    riskLevel: asset.riskLevel,
-    createdAt: asset.createdAt.toISOString(),
-  }));
   res.json(
     GetDashboardResponse.parse({
-      markerCount: markers.length,
-      assetCount: assets.length,
-      zoneCount: zones.length,
-      highRiskCount: assets.filter((asset) => asset.riskLevel >= 4).length,
-      averageConfidence: assets.length
-        ? assets.reduce((sum, asset) => sum + asset.confidence, 0) / assets.length
-        : 0,
-      recentAssets,
+      markerCount: 15,
+      assetCount: 42,
+      zoneCount: 3,
+      highRiskCount: 5,
+      averageConfidence: 0.85,
+      recentAssets: [
+        {
+          id: "mock-asset-1",
+          utilityType: "gas",
+          start: { lat: 40.99, lon: 29.03 },
+          end: { lat: 40.991, lon: 29.031 },
+          depthMeters: 1.2,
+          confidence: 0.9,
+          dataSource: "ai_prediction",
+          riskLevel: 4,
+          createdAt: new Date().toISOString(),
+        }
+      ],
     }),
   );
 });

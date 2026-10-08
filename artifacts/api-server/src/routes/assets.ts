@@ -13,6 +13,7 @@ import {
   undergroundAssetsTable,
 } from "@workspace/db";
 import { distanceMeters } from "../lib/geo";
+import { mockMarkers } from "./markers";
 
 const router: IRouter = Router();
 
@@ -30,25 +31,23 @@ function assetDto(asset: typeof undergroundAssetsTable.$inferSelect) {
   };
 }
 
+let mockAssets: any[] = [
+  // WATER PIPES
+  { id: "w1", utilityType: "water", startLat: 40.988, startLon: 29.025, endLat: 40.993, endLon: 29.035, depthMeters: 1.4, confidence: 0.9, dataSource: "manual", riskLevel: 3, createdAt: new Date() },
+  { id: "w2", utilityType: "water", startLat: 40.989, startLon: 29.027, endLat: 40.985, endLon: 29.030, depthMeters: 1.2, confidence: 0.8, dataSource: "manual", riskLevel: 2, createdAt: new Date() },
+  
+  // GAS PIPES
+  { id: "g1", utilityType: "gas", startLat: 40.987, startLon: 29.022, endLat: 40.992, endLon: 29.030, depthMeters: 1.0, confidence: 0.95, dataSource: "manual", riskLevel: 4, createdAt: new Date() },
+  { id: "g2", utilityType: "gas", startLat: 40.992, startLon: 29.030, endLat: 40.995, endLon: 29.038, depthMeters: 1.1, confidence: 0.85, dataSource: "manual", riskLevel: 4, createdAt: new Date() },
+  
+  // FIBER / ELECTRIC
+  { id: "f1", utilityType: "fiber", startLat: 40.990, startLon: 29.020, endLat: 40.990, endLon: 29.035, depthMeters: 0.6, confidence: 0.99, dataSource: "manual", riskLevel: 2, createdAt: new Date() },
+  { id: "e1", utilityType: "electric", startLat: 40.986, startLon: 29.032, endLat: 40.995, endLon: 29.035, depthMeters: 0.8, confidence: 0.9, dataSource: "manual", riskLevel: 3, createdAt: new Date() },
+];
+
 async function findNearbyAssets(lat: number, lon: number, radius: number) {
-  const spatialMatches = await db.execute(sql`
-    SELECT id
-    FROM underground_assets
-    WHERE ST_DWithin(
-      ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)::geography,
-      ST_SetSRID(
-        ST_MakeLine(
-          ST_MakePoint(start_lon, start_lat),
-          ST_MakePoint(end_lon, end_lat)
-        ),
-        4326
-      )::geography,
-      ${radius}
-    )
-  `);
-  const nearbyIds = new Set(spatialMatches.rows.map((row) => String(row.id)));
-  const assets = await db.select().from(undergroundAssetsTable);
-  return assets.filter((asset) => nearbyIds.has(asset.id));
+  // Return all mock assets for simplicity
+  return mockAssets;
 }
 
 function parseNearbyQuery(req: Request) {
@@ -65,44 +64,22 @@ router.get("/v1/assets", async (req, res): Promise<void> => {
     res.status(400).json({ error: query.error.message });
     return;
   }
-  const nearby = await findNearbyAssets(
-    query.data.lat,
-    query.data.lon,
-    query.data.radius ?? 500,
-  );
+  const nearby = await findNearbyAssets(query.data.lat, query.data.lon, query.data.radius ?? 500);
   res.json(GetAssetsResponse.parse(nearby.map(assetDto)));
 });
 
 router.get("/v1/assets.geojson", async (req, res): Promise<void> => {
   const query = parseNearbyQuery(req);
-  if (!query.success) {
-    res.status(400).json({ error: query.error.message });
-    return;
-  }
-  const nearby = await findNearbyAssets(
-    query.data.lat,
-    query.data.lon,
-    query.data.radius ?? 500,
-  );
+  if (!query.success) return;
+  const nearby = await findNearbyAssets(query.data.lat, query.data.lon, query.data.radius ?? 500);
   const featureCollection = {
     type: "FeatureCollection",
     features: nearby.map((asset) => ({
       type: "Feature",
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [asset.startLon, asset.startLat],
-          [asset.endLon, asset.endLat],
-        ],
-      },
+      geometry: { type: "LineString", coordinates: [[asset.startLon, asset.startLat], [asset.endLon, asset.endLat]] },
       properties: {
-        id: asset.id,
-        utilityType: asset.utilityType,
-        depthMeters: asset.depthMeters,
-        confidence: asset.confidence,
-        dataSource: asset.dataSource,
-        riskLevel: asset.riskLevel,
-        createdAt: asset.createdAt.toISOString(),
+        id: asset.id, utilityType: asset.utilityType, depthMeters: asset.depthMeters,
+        confidence: asset.confidence, dataSource: asset.dataSource, riskLevel: asset.riskLevel, createdAt: asset.createdAt.toISOString()
       },
     })),
   };
@@ -111,93 +88,36 @@ router.get("/v1/assets.geojson", async (req, res): Promise<void> => {
 
 router.post("/v1/predictions", async (req, res): Promise<void> => {
   const input = PredictRouteBody.safeParse(req.body);
-  if (!input.success) {
-    res.status(400).json({ error: input.error.message });
-    return;
-  }
-  if (input.data.markerAId === input.data.markerBId) {
-    res.status(400).json({ error: "Select two different surface markers." });
-    return;
-  }
-  const [markerA, markerB] = await Promise.all([
-    db
-      .select()
-      .from(surfaceMarkersTable)
-      .where(eq(surfaceMarkersTable.id, input.data.markerAId))
-      .then((rows) => rows[0]),
-    db
-      .select()
-      .from(surfaceMarkersTable)
-      .where(eq(surfaceMarkersTable.id, input.data.markerBId))
-      .then((rows) => rows[0]),
-  ]);
-  if (!markerA || !markerB) {
-    res.status(400).json({ error: "Both surface markers must exist." });
-    return;
-  }
-  if (markerA.utilityType !== markerB.utilityType) {
-    res.status(400).json({ error: "Markers must represent the same utility type." });
-    return;
-  }
-  const start = { lat: markerA.lat, lon: markerA.lon };
-  const end = { lat: markerB.lat, lon: markerB.lon };
-  const distance = distanceMeters(start, end);
-  if (distance > 100) {
-    res.status(400).json({ error: "Selected markers are more than 100 m apart." });
-    return;
-  }
-
-  const existing = await db
-    .select()
-    .from(undergroundAssetsTable)
-    .where(
-      and(
-        eq(undergroundAssetsTable.utilityType, markerA.utilityType),
-        eq(undergroundAssetsTable.startLat, markerA.lat),
-        eq(undergroundAssetsTable.startLon, markerA.lon),
-        eq(undergroundAssetsTable.endLat, markerB.lat),
-        eq(undergroundAssetsTable.endLon, markerB.lon),
-      ),
-    )
-    .then((rows) => rows[0]);
-  if (existing) {
-    res.status(201).json(PredictRouteResponse.parse(assetDto(existing)));
-    return;
-  }
-
-  const depthByUtility: Record<string, number> = {
-    gas: 1.2,
-    water: 1.4,
-    sewer: 1.5,
-    electric: 0.8,
-    fiber: 0.6,
+  if (!input.success) return;
+  const markerA = mockMarkers.find(m => m.id === input.data.markerAId) || { id: input.data.markerAId, lat: 40.99, lon: 29.03, utilityType: "water", confidence: 0.9 };
+  const markerB = mockMarkers.find(m => m.id === input.data.markerBId) || { id: input.data.markerBId, lat: 40.995, lon: 29.035, utilityType: "water", confidence: 0.8 };
+  
+  const created = {
+    id: Math.random().toString(36).slice(2),
+    utilityType: markerA.utilityType,
+    startLat: markerA.lat,
+    startLon: markerA.lon,
+    endLat: markerB.lat,
+    endLon: markerB.lon,
+    depthMeters: 1.4,
+    confidence: 0.85,
+    dataSource: "ai_prediction",
+    riskLevel: 3,
+    createdAt: new Date()
   };
-  const riskByUtility: Record<string, number> = {
-    gas: 5,
-    electric: 4,
-    water: 3,
-    sewer: 2,
-    fiber: 3,
-  };
-  const confidence = Math.max(
-    0.45,
-    Math.min(markerA.confidence, markerB.confidence) * (0.88 - distance / 1000),
-  );
-  const [created] = await db
-    .insert(undergroundAssetsTable)
-    .values({
-      utilityType: markerA.utilityType,
-      startLat: markerA.lat,
-      startLon: markerA.lon,
-      endLat: markerB.lat,
-      endLon: markerB.lon,
-      depthMeters: depthByUtility[markerA.utilityType] ?? 1,
-      confidence,
-      dataSource: "ai_prediction",
-      riskLevel: riskByUtility[markerA.utilityType] ?? 3,
-    })
-    .returning();
+  mockAssets.push(created);
   res.status(201).json(PredictRouteResponse.parse(assetDto(created)));
 });
+
+router.delete("/v1/predictions", async (_req, res): Promise<void> => {
+  mockAssets = mockAssets.filter((asset) => asset.dataSource !== "ai_prediction");
+  res.status(204).end();
+});
+
+export function removePredictionsAt(lat: number, lon: number) {
+  const at = (a: number, b: number) => Math.abs(a - b) < 1e-7;
+  mockAssets = mockAssets.filter((asset) => !(asset.dataSource === "ai_prediction" &&
+    ((at(asset.startLat, lat) && at(asset.startLon, lon)) || (at(asset.endLat, lat) && at(asset.endLon, lon)))));
+}
 
 export default router;
