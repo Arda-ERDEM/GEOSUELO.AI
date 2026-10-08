@@ -6,12 +6,24 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './assetFeatureCollection';
+export * from './assetFeatureCollectionType';
+export * from './assetGeoJSONFeature';
+export * from './assetGeoJSONFeatureGeometry';
+export * from './assetGeoJSONFeatureGeometryType';
+export * from './assetGeoJSONFeatureProperties';
+export * from './assetGeoJSONFeaturePropertiesDataSource';
+export * from './assetGeoJSONFeaturePropertiesUtilityType';
+export * from './assetGeoJSONFeatureType';
 export * from './coordinate';
 export * from './dashboardSummary';
+export * from './financialImpactAssessment';
+export * from './getAssetsGeojsonParams';
 export * from './getAssetsParams';
 export * from './healthStatus';
 export * from './predictionInput';
 export * from './riskAnalysis';
+export * from './riskAnalysisAssessmentMethod';
 export * from './riskAnalysisRiskLevel';
 export * from './riskConflict';
 export * from './surfaceMarker';

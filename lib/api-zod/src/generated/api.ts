@@ -248,6 +248,62 @@ export const GetAssetsResponse = zod.array(GetAssetsResponseItem)
 
 
 /**
+ * Coordinates use WGS84 (EPSG:4326) in GeoJSON order [longitude, latitude]. BIM clients should transform them to the project's coordinate system before placement.
+ * @summary Export nearby vector assets as GeoJSON for GIS and BIM clients
+ */
+export const getAssetsGeojsonQueryLatMin = -90;
+export const getAssetsGeojsonQueryLatMax = 90;
+
+export const getAssetsGeojsonQueryLonMin = -180;
+export const getAssetsGeojsonQueryLonMax = 180;
+
+export const getAssetsGeojsonQueryRadiusDefault = 500;
+export const getAssetsGeojsonQueryRadiusMax = 5000;
+
+
+
+export const GetAssetsGeojsonQueryParams = zod.object({
+  "lat": zod.coerce.number().min(getAssetsGeojsonQueryLatMin).max(getAssetsGeojsonQueryLatMax),
+  "lon": zod.coerce.number().min(getAssetsGeojsonQueryLonMin).max(getAssetsGeojsonQueryLonMax),
+  "radius": zod.coerce.number().min(1).max(getAssetsGeojsonQueryRadiusMax).default(getAssetsGeojsonQueryRadiusDefault)
+})
+
+export const getAssetsGeojsonResponseFeaturesItemGeometryCoordinatesItemMin = 2;
+export const getAssetsGeojsonResponseFeaturesItemGeometryCoordinatesItemMax = 2;
+
+export const getAssetsGeojsonResponseFeaturesItemGeometryCoordinatesMin = 2;
+
+export const getAssetsGeojsonResponseFeaturesItemPropertiesDepthMetersMin = 0;
+
+export const getAssetsGeojsonResponseFeaturesItemPropertiesConfidenceMin = 0;
+export const getAssetsGeojsonResponseFeaturesItemPropertiesConfidenceMax = 1;
+
+export const getAssetsGeojsonResponseFeaturesItemPropertiesRiskLevelMax = 5;
+
+
+
+export const GetAssetsGeojsonResponse = zod.object({
+  "type": zod.enum(['FeatureCollection']),
+  "features": zod.array(zod.object({
+  "type": zod.enum(['Feature']),
+  "geometry": zod.object({
+  "type": zod.enum(['LineString']),
+  "coordinates": zod.array(zod.array(zod.number()).min(getAssetsGeojsonResponseFeaturesItemGeometryCoordinatesItemMin).max(getAssetsGeojsonResponseFeaturesItemGeometryCoordinatesItemMax)).min(getAssetsGeojsonResponseFeaturesItemGeometryCoordinatesMin)
+}),
+  "properties": zod.object({
+  "id": zod.string(),
+  "utilityType": zod.enum(['water', 'gas', 'fiber', 'electric', 'sewer']),
+  "depthMeters": zod.number().min(getAssetsGeojsonResponseFeaturesItemPropertiesDepthMetersMin),
+  "confidence": zod.number().min(getAssetsGeojsonResponseFeaturesItemPropertiesConfidenceMin).max(getAssetsGeojsonResponseFeaturesItemPropertiesConfidenceMax),
+  "dataSource": zod.enum(['ai_prediction', 'manual']),
+  "riskLevel": zod.number().int().min(1).max(getAssetsGeojsonResponseFeaturesItemPropertiesRiskLevelMax),
+  "createdAt": zod.coerce.date()
+})
+}))
+})
+
+
+/**
  * @summary Predict a route between compatible surface markers
  */
 export const PredictRouteBody = zod.object({
@@ -401,6 +457,8 @@ export const analyzeZoneResponseConflictsItemAssetConfidenceMax = 1;
 
 export const analyzeZoneResponseConflictsItemAssetRiskLevelMax = 5;
 
+export const analyzeZoneResponseFinancialImpactAmountMin = 0;
+
 
 
 export const AnalyzeZoneResponse = zod.object({
@@ -415,6 +473,7 @@ export const AnalyzeZoneResponse = zod.object({
 }),
   "riskScore": zod.number().int().min(analyzeZoneResponseRiskScoreMin).max(analyzeZoneResponseRiskScoreMax),
   "riskLevel": zod.enum(['low', 'medium', 'high', 'critical']),
+  "assessmentMethod": zod.enum(['postgis_synthetic_vector_screening']),
   "conflicts": zod.array(zod.object({
   "asset": zod.object({
   "id": zod.string(),
@@ -435,7 +494,16 @@ export const AnalyzeZoneResponse = zod.object({
 }),
   "distanceMeters": zod.number()
 })),
-  "message": zod.string()
+  "message": zod.string(),
+  "evidence": zod.array(zod.string()),
+  "unknowns": zod.array(zod.string()),
+  "recommendedActions": zod.array(zod.string()),
+  "financialImpact": zod.object({
+  "estimated": zod.boolean(),
+  "amount": zod.number().min(analyzeZoneResponseFinancialImpactAmountMin).nullable(),
+  "currency": zod.string().nullable(),
+  "reason": zod.string()
+})
 })
 
 

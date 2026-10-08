@@ -1,6 +1,7 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request } from "express";
 import { and, eq, sql } from "drizzle-orm";
 import {
+  GetAssetsGeojsonResponse,
   GetAssetsQueryParams,
   GetAssetsResponse,
   PredictRouteBody,
@@ -29,22 +30,12 @@ function assetDto(asset: typeof undergroundAssetsTable.$inferSelect) {
   };
 }
 
-router.get("/v1/assets", async (req, res): Promise<void> => {
-  const query = GetAssetsQueryParams.safeParse({
-    lat: Number(req.query.lat),
-    lon: Number(req.query.lon),
-    radius: req.query.radius === undefined ? undefined : Number(req.query.radius),
-  });
-  if (!query.success) {
-    res.status(400).json({ error: query.error.message });
-    return;
-  }
-  const center = { lat: query.data.lat, lon: query.data.lon };
+async function findNearbyAssets(lat: number, lon: number, radius: number) {
   const spatialMatches = await db.execute(sql`
     SELECT id
     FROM underground_assets
     WHERE ST_DWithin(
-      ST_SetSRID(ST_MakePoint(${center.lon}, ${center.lat}), 4326)::geography,
+      ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)::geography,
       ST_SetSRID(
         ST_MakeLine(
           ST_MakePoint(start_lon, start_lat),
@@ -52,13 +43,70 @@ router.get("/v1/assets", async (req, res): Promise<void> => {
         ),
         4326
       )::geography,
-      ${query.data.radius ?? 500}
+      ${radius}
     )
   `);
   const nearbyIds = new Set(spatialMatches.rows.map((row) => String(row.id)));
   const assets = await db.select().from(undergroundAssetsTable);
-  const nearby = assets.filter((asset) => nearbyIds.has(asset.id)).map(assetDto);
-  res.json(GetAssetsResponse.parse(nearby));
+  return assets.filter((asset) => nearbyIds.has(asset.id));
+}
+
+function parseNearbyQuery(req: Request) {
+  return GetAssetsQueryParams.safeParse({
+    lat: Number(req.query.lat),
+    lon: Number(req.query.lon),
+    radius: req.query.radius === undefined ? undefined : Number(req.query.radius),
+  });
+}
+
+router.get("/v1/assets", async (req, res): Promise<void> => {
+  const query = parseNearbyQuery(req);
+  if (!query.success) {
+    res.status(400).json({ error: query.error.message });
+    return;
+  }
+  const nearby = await findNearbyAssets(
+    query.data.lat,
+    query.data.lon,
+    query.data.radius ?? 500,
+  );
+  res.json(GetAssetsResponse.parse(nearby.map(assetDto)));
+});
+
+router.get("/v1/assets.geojson", async (req, res): Promise<void> => {
+  const query = parseNearbyQuery(req);
+  if (!query.success) {
+    res.status(400).json({ error: query.error.message });
+    return;
+  }
+  const nearby = await findNearbyAssets(
+    query.data.lat,
+    query.data.lon,
+    query.data.radius ?? 500,
+  );
+  const featureCollection = {
+    type: "FeatureCollection",
+    features: nearby.map((asset) => ({
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [asset.startLon, asset.startLat],
+          [asset.endLon, asset.endLat],
+        ],
+      },
+      properties: {
+        id: asset.id,
+        utilityType: asset.utilityType,
+        depthMeters: asset.depthMeters,
+        confidence: asset.confidence,
+        dataSource: asset.dataSource,
+        riskLevel: asset.riskLevel,
+        createdAt: asset.createdAt.toISOString(),
+      },
+    })),
+  };
+  res.type("application/geo+json").json(GetAssetsGeojsonResponse.parse(featureCollection));
 });
 
 router.post("/v1/predictions", async (req, res): Promise<void> => {

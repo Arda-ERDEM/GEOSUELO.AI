@@ -172,6 +172,98 @@ export interface RiskConflict {
   distanceMeters: number;
 }
 
+export type AssetGeoJSONFeatureType = typeof AssetGeoJSONFeatureType[keyof typeof AssetGeoJSONFeatureType];
+
+
+export const AssetGeoJSONFeatureType = {
+  Feature: 'Feature',
+} as const;
+
+export type AssetGeoJSONFeatureGeometryType = typeof AssetGeoJSONFeatureGeometryType[keyof typeof AssetGeoJSONFeatureGeometryType];
+
+
+export const AssetGeoJSONFeatureGeometryType = {
+  LineString: 'LineString',
+} as const;
+
+export type AssetGeoJSONFeatureGeometry = {
+  type: AssetGeoJSONFeatureGeometryType;
+  /**
+     * @minItems 2
+     * @items.minItems 2
+     * @items.maxItems 2
+     */
+  coordinates: number[][];
+};
+
+export type AssetGeoJSONFeaturePropertiesUtilityType = typeof AssetGeoJSONFeaturePropertiesUtilityType[keyof typeof AssetGeoJSONFeaturePropertiesUtilityType];
+
+
+export const AssetGeoJSONFeaturePropertiesUtilityType = {
+  water: 'water',
+  gas: 'gas',
+  fiber: 'fiber',
+  electric: 'electric',
+  sewer: 'sewer',
+} as const;
+
+export type AssetGeoJSONFeaturePropertiesDataSource = typeof AssetGeoJSONFeaturePropertiesDataSource[keyof typeof AssetGeoJSONFeaturePropertiesDataSource];
+
+
+export const AssetGeoJSONFeaturePropertiesDataSource = {
+  ai_prediction: 'ai_prediction',
+  manual: 'manual',
+} as const;
+
+export type AssetGeoJSONFeatureProperties = {
+  id: string;
+  utilityType: AssetGeoJSONFeaturePropertiesUtilityType;
+  /** @minimum 0 */
+  depthMeters: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  confidence: number;
+  dataSource: AssetGeoJSONFeaturePropertiesDataSource;
+  /**
+     * @minimum 1
+     * @maximum 5
+     */
+  riskLevel: number;
+  createdAt: string;
+};
+
+export interface AssetGeoJSONFeature {
+  type: AssetGeoJSONFeatureType;
+  geometry: AssetGeoJSONFeatureGeometry;
+  properties: AssetGeoJSONFeatureProperties;
+}
+
+export type AssetFeatureCollectionType = typeof AssetFeatureCollectionType[keyof typeof AssetFeatureCollectionType];
+
+
+export const AssetFeatureCollectionType = {
+  FeatureCollection: 'FeatureCollection',
+} as const;
+
+export interface AssetFeatureCollection {
+  type: AssetFeatureCollectionType;
+  features: AssetGeoJSONFeature[];
+}
+
+export interface FinancialImpactAssessment {
+  estimated: boolean;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  amount: number | null;
+  /** @nullable */
+  currency: string | null;
+  reason: string;
+}
+
 export type RiskAnalysisRiskLevel = typeof RiskAnalysisRiskLevel[keyof typeof RiskAnalysisRiskLevel];
 
 
@@ -182,6 +274,13 @@ export const RiskAnalysisRiskLevel = {
   critical: 'critical',
 } as const;
 
+export type RiskAnalysisAssessmentMethod = typeof RiskAnalysisAssessmentMethod[keyof typeof RiskAnalysisAssessmentMethod];
+
+
+export const RiskAnalysisAssessmentMethod = {
+  postgis_synthetic_vector_screening: 'postgis_synthetic_vector_screening',
+} as const;
+
 export interface RiskAnalysis {
   zone: Zone;
   /**
@@ -190,8 +289,13 @@ export interface RiskAnalysis {
      */
   riskScore: number;
   riskLevel: RiskAnalysisRiskLevel;
+  assessmentMethod: RiskAnalysisAssessmentMethod;
   conflicts: RiskConflict[];
   message: string;
+  evidence: string[];
+  unknowns: string[];
+  recommendedActions: string[];
+  financialImpact: FinancialImpactAssessment;
 }
 
 export interface DashboardSummary {
@@ -204,6 +308,24 @@ export interface DashboardSummary {
 }
 
 export type GetAssetsParams = {
+/**
+ * @minimum -90
+ * @maximum 90
+ */
+lat: number;
+/**
+ * @minimum -180
+ * @maximum 180
+ */
+lon: number;
+/**
+ * @minimum 1
+ * @maximum 5000
+ */
+radius?: number;
+};
+
+export type GetAssetsGeojsonParams = {
 /**
  * @minimum -90
  * @maximum 90

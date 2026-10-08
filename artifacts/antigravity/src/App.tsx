@@ -299,6 +299,14 @@ function Workspace() {
                     <div style={{ display: 'flex', gap: 9, alignItems: 'baseline', marginTop: 8 }}><span className="risk-score">{analysis.riskScore}</span><span>100 üzerinden risk puanı</span></div>
                     <div style={{ marginTop: 5 }}>{analysis.conflicts.length} olası çakışma · {analysis.message}</div>
                     {analysis.conflicts.map((conflict) => <div className="conflict-item" key={conflict.asset.id}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong>{enumLabel(conflict.asset.utilityType)} hattı</strong><span className={`risk-badge ${conflict.asset.riskLevel >= 4 ? 'risk-high' : conflict.asset.riskLevel >= 3 ? 'risk-medium' : 'risk-low'}`}>Risk {conflict.asset.riskLevel}/5</span></div><div className="asset-meta">{conflict.distanceMeters} m bölgeye uzaklık · {conflict.asset.depthMeters} m derinlik · tahmindir, GPR ile doğrulanmamıştır</div></div>)}
+                    <div className="risk-report">
+                      <div className="risk-report-method"><strong>Yöntem</strong><span>PostGIS vektör kesişimi + sentetik hat taraması</span></div>
+                      <section><strong>Kanıt ve veri kaynağı</strong><ul>{analysis.evidence.map((item, index) => <li key={`evidence-${index}`}>{item}</li>)}</ul></section>
+                      <section><strong>Bu veride bulunmayanlar</strong><ul>{analysis.unknowns.map((item, index) => <li key={`unknown-${index}`}>{item}</li>)}</ul></section>
+                      <section><strong>Önerilen adımlar</strong><ul>{analysis.recommendedActions.map((item, index) => <li key={`action-${index}`}>{item}</li>)}</ul></section>
+                      <div className="risk-report-finance"><strong>Parasal hasar tahmini</strong><span>{analysis.financialImpact.estimated && analysis.financialImpact.amount !== null ? `${analysis.financialImpact.amount.toLocaleString('tr-TR')} ${analysis.financialImpact.currency ?? ''}` : 'Hesaplanmadı'}</span><small>{analysis.financialImpact.reason}</small></div>
+                      <div className="risk-report-warning" role="note"><AlertTriangle size={13} /> Bu rapor ön taramadır; saha doğrulaması, işletmeci teyidi veya kazı izninin yerine geçmez.</div>
+                    </div>
                   </div>}
                 </div>
               </section>
@@ -343,7 +351,15 @@ function Workspace() {
 
           <section className="api-panel" style={{ marginTop: 16 }}>
             <div className="api-head" onClick={() => setApiExpanded((open) => !open)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setApiExpanded((open) => !open); }} data-testid="toggle-api-example"><div className="panel-title"><CircleHelp size={14} color="#34746a" /> API hızlı başvuru <span className="panel-kicker">REST · /api</span></div>{apiExpanded ? <X size={14} /> : <ChevronDown size={15} />}</div>
-            {apiExpanded && <div className="api-body"><div className="hint">İstekler yapılandırılmış API adresini kullanır. Tahmin edilen tüm yeraltı hatları, GPR ile doğrulanmış veri değil tahmindir.</div><div className="api-example">{`GET  /api/v1/markers\nPOST /api/v1/predictions   { markerAId, markerBId }\nGET  /api/v1/assets?lat=40.99&lon=29.03&radius=1200\nPOST /api/v1/zones/{id}/analyze`}</div><div className="api-note">Sağlık durumu: {health.isLoading ? 'denetleniyor…' : health.isError ? 'kullanılamıyor' : health.data?.status ?? 'bilinmiyor'} · İstekler oluşturulmuş API istemcisi üzerinden yapılır.</div></div>}
+            {apiExpanded && <div className="api-body">
+              <div className="hint">REST API; JSON varlık listesi ve GIS/BIM araçları için GeoJSON hat geometrisi sunar. Yeraltı hatları sentetik tahmindir, GPR ölçümü değildir. GeoJSON koordinatları WGS84/EPSG:4326 biçiminde [boylam, enlem] sırasındadır; BIM projesinin koordinat sistemine dönüştürün.</div>
+              <div className="api-example">{`GET  /api/v1/markers\nPOST /api/v1/predictions   { markerAId, markerBId }\nGET  /api/v1/assets?lat=40.99&lon=29.03&radius=50\nGET  /api/v1/assets.geojson?lat=40.99&lon=29.03&radius=50\nPOST /api/v1/zones/{id}/analyze`}</div>
+              <div className="api-doc-label">GIS/BIM istemcisi için örnek istek</div>
+              <div className="api-example">{`curl -H "Accept: application/geo+json" \\\n  "https://<API_HOST>/api/v1/assets.geojson?lat=40.99032&lon=29.02715&radius=50"`}</div>
+              <div className="api-doc-label">Örnek GeoJSON yanıtı · temsili</div>
+              <pre className="api-example api-json-example">{`{\n  "type": "FeatureCollection",\n  "features": [{\n    "type": "Feature",\n    "geometry": {\n      "type": "LineString",\n      "coordinates": [[29.02715, 40.99032], [29.02779, 40.99065]]\n    },\n    "properties": {\n      "id": "asset-id", "utilityType": "gas", "depthMeters": 1.2,\n      "confidence": 0.72, "dataSource": "ai_prediction", "riskLevel": 5,\n      "createdAt": "2026-10-08T12:00:00.000Z"\n    }\n  }]\n}`}</pre>
+              <div className="api-note">Bu uç, eklentiye hazır veri sağlar; AutoCAD/Revit eklentisi bu MVP’nin parçası değildir. Sağlık durumu: {health.isLoading ? 'denetleniyor…' : health.isError ? 'kullanılamıyor' : health.data?.status ?? 'bilinmiyor'}.</div>
+            </div>}
           </section>
         </div>
       </main>

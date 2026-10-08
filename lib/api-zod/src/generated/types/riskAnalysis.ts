@@ -5,6 +5,8 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { FinancialImpactAssessment } from './financialImpactAssessment';
+import type { RiskAnalysisAssessmentMethod } from './riskAnalysisAssessmentMethod';
 import type { RiskAnalysisRiskLevel } from './riskAnalysisRiskLevel';
 import type { RiskConflict } from './riskConflict';
 import type { Zone } from './zone';
@@ -17,6 +19,11 @@ export interface RiskAnalysis {
      */
   riskScore: number;
   riskLevel: RiskAnalysisRiskLevel;
+  assessmentMethod: RiskAnalysisAssessmentMethod;
   conflicts: RiskConflict[];
   message: string;
+  evidence: string[];
+  unknowns: string[];
+  recommendedActions: string[];
+  financialImpact: FinancialImpactAssessment;
 }

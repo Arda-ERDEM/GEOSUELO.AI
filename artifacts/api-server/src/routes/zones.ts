@@ -115,14 +115,53 @@ router.post("/v1/zones/:id/analyze", async (req, res): Promise<void> => {
   const message =
     conflicts.length === 0
       ? "Bu kazı alanında kayıtlı tahmini hatlarla kesişme bulunmadı. Bu sonuç güvenli kazı garantisi değildir."
-      : `DİKKAT: Bu alanda ${conflicts.length} tahmini altyapı hattı kesişiyor. En yüksek olasılık ${(Math.max(...conflicts.map(({ asset }) => asset.confidence)) * 100).toFixed(0)}%, tahmini derinlik ${Math.min(...conflicts.map(({ asset }) => asset.depthMeters)).toFixed(1)} m. Kazı risk puanı: ${riskScore}/100 (${riskLevel}).`;
+      : `DİKKAT: Bu alanda ${conflicts.length} tahmini altyapı hattı kesişiyor. En yüksek tahmin güveni ${(Math.max(...conflicts.map(({ asset }) => asset.confidence)) * 100).toFixed(0)}%, tahmini derinlik ${Math.min(...conflicts.map(({ asset }) => asset.depthMeters)).toFixed(1)} m. Kazı risk puanı: ${riskScore}/100 (${riskLevel}).`;
+  const evidence =
+    conflicts.length === 0
+      ? [
+          "Kazı poligonu, kayıtlı vektör hatlarıyla PostGIS ST_Intersects kullanılarak karşılaştırıldı; kayıtlı hatlarla kesişme bulunmadı.",
+          "Sonuç yalnızca sistemde kayıtlı hatları kapsar; eksik veya kaydedilmemiş altyapıyı dışlamaz.",
+        ]
+      : [
+          `PostGIS ST_Intersects, kazı poligonu ile ${conflicts.length} kayıtlı hat arasında kesişme buldu.`,
+          `Çakışan hat kaynakları: ${[...new Set(conflicts.map(({ asset }) => asset.dataSource))].join(", ")}.`,
+          "Güven puanı model çıktısının güven değeridir; kalibre edilmiş kaza olasılığı değildir.",
+          "Risk puanı hat türü ve kayıtlı risk seviyesinden üretilen sezgisel bir endekstir; parasal hasar tahmini değildir.",
+        ];
+  const unknowns = [
+    "Hat malzemesi ve yapım yılı kayıtlarda bulunmuyor.",
+    "Belediye/işletmeci proje kayıtları ve gerçek GPR ya da saha ölçümü bu analize dahil değil.",
+    "Malzeme, yaş ve maliyet verisi olmadığından parasal hasar tutarı hesaplanmadı.",
+  ];
+  const recommendedActions =
+    conflicts.length === 0
+      ? [
+          "Kayıtlı hatlarla kesişme olmaması güvenli kazı anlamına gelmez; güncel işletmeci kayıtlarını ayrıca doğrulayın.",
+          "Kazı öncesinde sahada yetkili ekip ve uygun altyapı tespit yöntemiyle kontrol yapın.",
+        ]
+      : [
+          "Kazı öncesinde ilgili altyapı işletmecisinden güncel hat projesi ve çalışma izni teyidi alın.",
+          "Tahmini konumu sahada yetkili ekip ve uygun altyapı tespit yöntemiyle doğrulayın.",
+          "Bu sentetik ön taramayı tek başına kazı izni veya güvenlik kararı olarak kullanmayın.",
+        ];
   res.json(
     AnalyzeZoneResponse.parse({
       zone: zoneDto(zone),
       riskScore,
       riskLevel,
+      assessmentMethod: "postgis_synthetic_vector_screening",
       conflicts,
       message,
+      evidence,
+      unknowns,
+      recommendedActions,
+      financialImpact: {
+        estimated: false,
+        amount: null,
+        currency: null,
+        reason:
+          "Hat malzemesi, yapım yılı ve doğrulanmış hasar maliyetleri bulunmadığından güvenilir parasal tahmin üretilemiyor.",
+      },
     }),
   );
 });

@@ -218,6 +218,8 @@
 .api-head {padding:12px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;}
 .api-body {padding:0 14px 13px;border-top:1px solid #ece9df;}
 .api-example {font:10px/1.8 var(--app-font-mono);color:#49615f;background:#f1f2e9;border-radius:6px;padding:10px;white-space:pre-wrap;margin-top:10px;}
+.api-doc-label {font-size:9px;font-weight:700;color:#49615f;margin-top:10px;}
+.api-json-example {overflow-x:auto;margin:5px 0 0;font-size:9px;}
 .api-note {font-size:10px;color:#87928b;margin-top:8px;}
 .modal-backdrop {position:fixed;inset:0;background:rgba(20,41,43,.42);z-index:20;display:grid;place-items:center;padding:16px;backdrop-filter:blur(3px);}
 .modal {width:min(460px,100%);background:#faf9f3;border:1px solid #d8ddd1;border-radius:11px;box-shadow:0 22px 70px rgba(20,39,39,.25);overflow:hidden;animation:modal-in .18s ease-out;}
@@ -234,6 +236,17 @@
 .risk-score {font:800 24px Manrope,sans-serif;color:#2e6258;}
 .conflict-item {padding:9px 0;border-bottom:1px solid #eeece4;}
 .conflict-item:last-child {border-bottom:0;}
+.risk-report {display:grid;gap:9px;margin-top:10px;padding-top:10px;border-top:1px solid #d9e3d1;color:#4f655c;}
+.risk-report section {padding:8px;background:#f7f7f0;border:1px solid #e5e8dc;border-radius:5px;}
+.risk-report section > strong,.risk-report-method strong,.risk-report-finance strong {display:block;color:#34584e;font-size:10px;margin-bottom:4px;}
+.risk-report ul {margin:4px 0 0;padding-left:16px;display:grid;gap:4px;font-size:9px;line-height:1.5;}
+.risk-report-method {display:flex;justify-content:space-between;gap:8px;align-items:baseline;font-size:9px;}
+.risk-report-method strong {margin:0;white-space:nowrap;}
+.risk-report-finance {padding:8px;background:#f7f3e9;border:1px solid #eadfca;border-radius:5px;}
+.risk-report-finance span {display:block;font-size:10px;font-weight:700;color:#745e37;}
+.risk-report-finance small {display:block;margin-top:4px;font-size:9px;line-height:1.45;color:#83765d;}
+.risk-report-warning {display:flex;gap:6px;align-items:flex-start;padding:8px;background:#fff1e6;border:1px solid #f0d2b7;border-radius:5px;color:#8a4c31;font-size:9px;line-height:1.45;}
+.risk-report-warning svg {flex:none;margin-top:1px;}
 .error-box {border:1px solid #e7c8c0;background:#fff6f3;border-radius:7px;padding:10px;color:#934b40;font-size:10px;line-height:1.5;margin-bottom:10px;}
 .loading-row {height:38px;background:linear-gradient(90deg,#eeede5 25%,#f7f6ef 45%,#eeede5 65%);background-size:200% 100%;animation:shimmer 1.4s infinite;border-radius:5px;margin:8px 0;}
 .toast-msg {position:fixed;bottom:20px;right:20px;z-index:40;background:#294b4d;color:#f5f4e9;padding:11px 15px;border-radius:7px;font-size:11px;box-shadow:0 9px 26px #253b3b33;animation:toast-in .2s ease-out;}

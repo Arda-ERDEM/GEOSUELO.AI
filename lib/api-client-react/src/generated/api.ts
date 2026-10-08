@@ -20,7 +20,9 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AssetFeatureCollection,
   DashboardSummary,
+  GetAssetsGeojsonParams,
   GetAssetsParams,
   HealthStatus,
   PredictionInput,
@@ -614,6 +616,91 @@ export function useGetAssets<TData = Awaited<ReturnType<typeof getAssets>>, TErr
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAssetsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAssetsGeojsonUrl = (params: GetAssetsGeojsonParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/assets.geojson?${stringifiedParams}` : `/api/v1/assets.geojson`
+}
+
+/**
+ * Coordinates use WGS84 (EPSG:4326) in GeoJSON order [longitude, latitude]. BIM clients should transform them to the project's coordinate system before placement.
+ * @summary Export nearby vector assets as GeoJSON for GIS and BIM clients
+ */
+export const getAssetsGeojson = async (params: GetAssetsGeojsonParams, options?: Parameters<typeof customFetch>[1]): Promise<AssetFeatureCollection> => {
+
+  return customFetch<AssetFeatureCollection>(getGetAssetsGeojsonUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAssetsGeojsonQueryKey = (params?: GetAssetsGeojsonParams,) => {
+    return [
+    `/api/v1/assets.geojson`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAssetsGeojsonQueryOptions = <TData = Awaited<ReturnType<typeof getAssetsGeojson>>, TError = ErrorType<unknown>>(params: GetAssetsGeojsonParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAssetsGeojson>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAssetsGeojsonQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAssetsGeojson>>> = ({ signal }) => getAssetsGeojson(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAssetsGeojson>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAssetsGeojsonQueryResult = NonNullable<Awaited<ReturnType<typeof getAssetsGeojson>>>
+export type GetAssetsGeojsonQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Export nearby vector assets as GeoJSON for GIS and BIM clients
+ */
+
+export function useGetAssetsGeojson<TData = Awaited<ReturnType<typeof getAssetsGeojson>>, TError = ErrorType<unknown>>(
+ params: GetAssetsGeojsonParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAssetsGeojson>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAssetsGeojsonQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
