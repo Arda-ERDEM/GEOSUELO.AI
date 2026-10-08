@@ -7,7 +7,7 @@ import {
 } from '@workspace/api-client-react';
 import type { Coordinate, SurfaceMarker, SurfaceMarkerInput, UndergroundAsset } from '@workspace/api-client-react';
 import {
-  Activity, AlertTriangle, ArrowDownUp, ArrowRight, Cable, Check, ChevronDown, CircleHelp,
+  Activity, AlertTriangle, ArrowDownUp, Cable, Check, ChevronDown, CircleHelp,
   Crosshair, Edit3, Gauge, Layers3, MapPin, Minus, Plus, RefreshCw,
   Route, Search, ShieldCheck, Trash2, Triangle, X,
 } from 'lucide-react';
@@ -185,28 +185,12 @@ function Workspace() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark"><Layers3 size={19} strokeWidth={1.8} /></div>
-          <div className="brand-copy"><div className="brand-name">AntiGravity</div><div className="brand-sub">Altyapı zekâsı</div></div>
-        </div>
-        <div className="side-label">Çalışma alanı</div>
-        <nav className="side-nav" aria-label="Çalışma alanı gezinmesi">
-          <button className="nav-item active" data-testid="nav-map"><MapPin size={16} /><span className="nav-copy">Risk haritası</span></button>
-          <button className="nav-item" onClick={() => document.getElementById('markers-section')?.scrollIntoView({ behavior: 'smooth' })} data-testid="nav-markers"><Crosshair size={16} /><span className="nav-copy">Yüzey işaretleri</span></button>
-          <button className="nav-item" onClick={() => document.getElementById('zones-panel')?.scrollIntoView({ behavior: 'smooth' })} data-testid="nav-zones"><Triangle size={16} /><span className="nav-copy">Kazı bölgeleri</span></button>
-        </nav>
-        <div className="side-label">Saha araçları</div>
-        <nav className="side-nav">
-          <button className="nav-item" onClick={() => document.getElementById('route-panel')?.scrollIntoView({ behavior: 'smooth' })} data-testid="nav-route"><Route size={16} /><span className="nav-copy">Güzergâh tahmini</span></button>
-          <button className="nav-item" onClick={() => document.getElementById('nearby-panel')?.scrollIntoView({ behavior: 'smooth' })} data-testid="nav-assets"><Search size={16} /><span className="nav-copy">Yakındaki varlıklar</span></button>
-        </nav>
-        <div className="side-foot"><span className="health-dot" style={{ background: health.isError ? '#d58468' : undefined }} />{health.isLoading ? 'Servis denetleniyor…' : health.isError ? 'Servise ulaşılamıyor' : `API ${health.data?.status ?? 'bağlı'}`}<br /><span style={{ color: '#819794' }}>Kadıköy saha çalışma alanı</span></div>
-      </aside>
-
       <main className="main-area">
         <header className="topbar">
-          <div className="crumb"><span>Operasyonlar</span><ArrowRight size={12} /><strong>Risk haritası</strong></div>
+          <div className="topbar-brand">
+            <div className="topbar-brand-mark"><Layers3 size={17} strokeWidth={1.8} /></div>
+            <div className="topbar-brand-copy"><strong>AntiGravity</strong><span>Risk haritası</span></div>
+          </div>
           <div className="top-actions">
             <div className="live-tag"><span className="health-dot" style={{ width: 6, height: 6 }} />{health.isError ? 'API çevrimdışı' : 'Sistem hazır'}</div>
             <div className="top-date">İSTANBUL · 40.990° N / 29.030° E</div>
