@@ -1,1 +1,2 @@
 - [AntiGravity backend target](antigravity-backend-target.md) — the product brief targets C#/.NET 8; the running Replit MVP currently uses the shared Node API.
+- [AntiGravity interface principles](antigravity-ui-principles.md) — keep the map and key excavation risk clear; group less-used controls to reduce clutter.
