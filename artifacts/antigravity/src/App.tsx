@@ -226,6 +226,7 @@ function Workspace() {
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> katkıda bulunanlar'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                   />
+                  <MapSizeInvalidator />
                   <MapViewport center={searchCenter} zoom={viewZoom} onCenterChange={(coordinate) => {
                     setSearchCenter((previous) => Math.abs(previous.lat - coordinate.lat) < 0.00002 && Math.abs(previous.lon - coordinate.lon) < 0.00002 ? previous : coordinate);
                     setSearchLat(coordinate.lat.toFixed(6));
@@ -389,6 +390,26 @@ function ErrorBox({ message, onRetry }: { message: string; onRetry: () => void }
 }
 function AssetRow({ asset }: { asset: UndergroundAsset }) {
   return <div className="asset-row" data-testid={`asset-result-${asset.id}`}><div><div className="asset-name">{enumLabel(asset.utilityType)} hattı</div><div className="asset-meta">{asset.depthMeters} m · {Math.round(asset.confidence * 100)}% güven</div></div><span className={`risk-badge ${asset.riskLevel >= 4 ? 'risk-high' : asset.riskLevel >= 3 ? 'risk-medium' : 'risk-low'}`}>Risk {asset.riskLevel}/5</span></div>;
+}
+function MapSizeInvalidator() {
+  const map = useMap();
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return;
+    const container = map.getContainer();
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        map.invalidateSize({ pan: false, debounceMoveend: true });
+      });
+    });
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [map]);
+  return null;
 }
 function MapViewport({ center, zoom, onCenterChange, onZoomChange }: { center: Coordinate; zoom: number; onCenterChange: (coordinate: Coordinate) => void; onZoomChange: (zoom: number) => void }) {
   const map = useMap();
